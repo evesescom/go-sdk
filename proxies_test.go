@@ -159,6 +159,26 @@ func TestProxiesAutoRenew(t *testing.T) {
 	}
 }
 
+func TestProxiesResetSessions(t *testing.T) {
+	var gotPath, gotMethod string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"reset": true}`))
+	})
+
+	if err := client.Proxies.ResetSessions(context.Background()); err != nil {
+		t.Fatalf("ResetSessions returned error: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/account/proxies/sessions/reset" {
+		t.Errorf("path = %q, want /api/account/proxies/sessions/reset", gotPath)
+	}
+}
+
 func TestProxiesCancelSubscription(t *testing.T) {
 	var gotPath string
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

@@ -113,6 +113,9 @@ _, _ = client.Proxies.AutoRenew(ctx, staticOrder.UUID, true)
 _, _ = client.Proxies.CancelSubscription(ctx)
 _, _ = client.Proxies.PauseSubscription(ctx)
 _, _ = client.Proxies.ResumeSubscription(ctx)
+
+// Reset residential sticky sessions (next request rotates IPs)
+_ = client.Proxies.ResetSessions(ctx)
 ```
 
 `ProxyQuote` decodes leniently — commonly-present fields (`PriceCents`, `Currency`, `DiscountPct`, …) are promoted; the full payload is on `.Raw`.

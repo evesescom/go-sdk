@@ -480,6 +480,17 @@ func (s *ProxiesService) ResumeSubscription(ctx context.Context) (*ProxySubscrip
 	return s.subscriptionAction(ctx, "resume")
 }
 
+// ResetSessions resets the current user's residential sticky sessions. The
+// next request through the residential proxy rotates to fresh IPs. Requires a
+// provisioned residential sub-user (else the API returns 404 no_subuser).
+func (s *ProxiesService) ResetSessions(ctx context.Context) error {
+	var raw json.RawMessage
+	return s.client.do(ctx, requestOptions{
+		method: "POST",
+		path:   "/api/account/proxies/sessions/reset",
+	}, &raw)
+}
+
 func (s *ProxiesService) subscriptionAction(ctx context.Context, action string) (*ProxySubscription, error) {
 	var raw json.RawMessage
 	if err := s.client.do(ctx, requestOptions{
