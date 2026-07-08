@@ -20,6 +20,11 @@ order, _ := client.Activations.Create(ctx, &eveses.CreateActivationParams{Countr
 sms, _   := client.Activations.Sms(ctx, order.OrderID)
 bal, _   := client.Wallet.Balance(ctx)
 svcs, _  := client.Catalog.Services(ctx, &eveses.CatalogServicesParams{Mode: eveses.OrderModeActivation, Country: "ua"})
+
+// New product lines:
+proxies, _ := client.Proxies.List(ctx)
+unblock, _ := client.WebUnblocker.List(ctx)
+inboxes, _ := client.Emails.List(ctx)
 ```
 
 `EVESES_API_KEY` should be a Sanctum API token (kind=`api_key`) issued from your Eveses dashboard. Never commit it — read it from the environment, a secret manager, or your platform's config store.
@@ -73,6 +78,83 @@ pricing, _ := client.Catalog.Pricing(ctx, &eveses.CatalogPricingParams{
 ```
 
 The `Service` field on `CatalogPricingParams` is the friendlier name for the wire param `product`; the SDK translates it for you. Same for `DurationMinutes` → `duration`.
+
+## Proxies
+
+Residential (metered/GB) and static (per-IP: ISP, datacenter, IPv6, mobile, sneaker) proxies. Money is integer cents; traffic is GB (float).
+
+```go
+overview, _ := client.Proxies.List(ctx)          // residential access + subscription + orders
+packages, _ := client.Proxies.Packages(ctx)      // residential GB price ladder
+catalog,  _ := client.Proxies.Catalog(ctx)       // static products/plans/locations
+locs,     _ := client.Proxies.Locations(ctx, "residential")
+usage,    _ := client.Proxies.Usage(ctx, "2026-06-01", "2026-06-30")
+
+// Quote (residential GB)
+gb := 5.0
+quote, _ := client.Proxies.Quote(ctx, &eveses.ProxyQuoteParams{Type: "residential", GB: &gb, Subscription: true})
+
+// Purchase (residential top-up) with idempotency
+order, _ := client.Proxies.Purchase(ctx, &eveses.PurchaseProxyParams{
+    Type: "residential", GB: &gb, Subscription: true, IdempotencyKey: "abc-123",
+})
+
+// Static per-IP purchase
+pid, plan, loc, qty := 7, 3, 11, 2
+staticOrder, _ := client.Proxies.Purchase(ctx, &eveses.PurchaseProxyParams{
+    Type: "isp", ProductID: &pid, PlanID: &plan, LocationID: &loc, Quantity: &qty,
+})
+
+// Per-IP order management
+_, _ = client.Proxies.Extend(ctx, staticOrder.UUID, 30)
+_, _ = client.Proxies.AutoRenew(ctx, staticOrder.UUID, true)
+
+// Residential subscription
+_, _ = client.Proxies.CancelSubscription(ctx)
+_, _ = client.Proxies.PauseSubscription(ctx)
+_, _ = client.Proxies.ResumeSubscription(ctx)
+```
+
+`ProxyQuote` decodes leniently — commonly-present fields (`PriceCents`, `Currency`, `DiscountPct`, …) are promoted; the full payload is on `.Raw`.
+
+## Web Unblocker
+
+Anti-bot scraping endpoint billed per successful request. Separate product from proxies.
+
+```go
+overview, _ := client.WebUnblocker.List(ctx)        // access + quota + subscription + orders
+packages, _ := client.WebUnblocker.Packages(ctx)    // request-bundle price ladder
+quote,    _ := client.WebUnblocker.Quote(ctx, 25000, false)
+
+order, _ := client.WebUnblocker.Purchase(ctx, &eveses.PurchaseWebUnblockerParams{
+    Requests: 10000, Subscription: true, IdempotencyKey: "abc-123",
+})
+
+_, _ = client.WebUnblocker.CancelSubscription(ctx)
+_, _ = client.WebUnblocker.PauseSubscription(ctx)
+_, _ = client.WebUnblocker.ResumeSubscription(ctx)
+```
+
+## Emails
+
+Rent an inbox address (our catch-all domains or a reseller) and read its mail.
+
+```go
+emails,  _ := client.Emails.List(ctx)
+domains, _ := client.Emails.Domains(ctx, "")        // "" = our catch-all domains; pass site for resellers
+quote,   _ := client.Emails.Quote(ctx, &eveses.EmailQuoteParams{Domain: "example.com"})
+
+addr, _ := client.Emails.Purchase(ctx, &eveses.PurchaseEmailParams{
+    Domain: "example.com", IdempotencyKey: "abc-123",
+})
+
+// Get() live-syncs reseller inboxes — poll it for new mail.
+order, _ := client.Emails.Get(ctx, addr.UUID)
+for _, m := range order.Messages { fmt.Println(m.From, m.Subject, m.Body) }
+
+// Soft cancel (no refund) → status "cancelled"
+_, _ = client.Emails.Delete(ctx, addr.UUID)
+```
 
 ## Webhooks
 

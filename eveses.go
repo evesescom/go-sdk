@@ -71,9 +71,12 @@ type Client struct {
 	userAgent      string
 	defaultHeaders map[string]string
 
-	Activations *ActivationsService
-	Wallet      *WalletService
-	Catalog     *CatalogService
+	Activations  *ActivationsService
+	Wallet       *WalletService
+	Catalog      *CatalogService
+	Proxies      *ProxiesService
+	WebUnblocker *WebUnblockerService
+	Emails       *EmailsService
 }
 
 // New constructs a Client from Config. Returns an error iff APIKey is empty.
@@ -112,6 +115,9 @@ func New(cfg Config) (*Client, error) {
 	c.Activations = &ActivationsService{client: c}
 	c.Wallet = &WalletService{client: c}
 	c.Catalog = &CatalogService{client: c}
+	c.Proxies = &ProxiesService{client: c}
+	c.WebUnblocker = &WebUnblockerService{client: c}
+	c.Emails = &EmailsService{client: c}
 	return c, nil
 }
 
@@ -368,4 +374,3 @@ func copyHeaders(in map[string]string) map[string]string {
 	}
 	return out
 }
-
