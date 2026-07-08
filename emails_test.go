@@ -20,7 +20,7 @@ func TestEmailsList_HappyPath(t *testing.T) {
 		}`))
 	})
 
-	emails, err := client.Emails.List(context.Background())
+	emails, err := client.Emails.List(context.Background(), false)
 	if err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
@@ -29,6 +29,118 @@ func TestEmailsList_HappyPath(t *testing.T) {
 	}
 	if len(emails) != 1 || emails[0].Address != "a@x.com" {
 		t.Fatalf("emails = %#v", emails)
+	}
+}
+
+func TestEmailsList_IncludeReleased(t *testing.T) {
+	var gotIncludeReleased string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotIncludeReleased = r.URL.Query().Get("include_released")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": {"emails": []}}`))
+	})
+
+	if _, err := client.Emails.List(context.Background(), true); err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if gotIncludeReleased != "1" {
+		t.Errorf("include_released query = %q, want 1", gotIncludeReleased)
+	}
+}
+
+func TestEmailsList_ExcludesReleasedByDefault(t *testing.T) {
+	var gotRawQuery string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": {"emails": []}}`))
+	})
+
+	if _, err := client.Emails.List(context.Background(), false); err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if gotRawQuery != "" {
+		t.Errorf("query = %q, want empty (no include_released)", gotRawQuery)
+	}
+}
+
+func TestEmailsMessages_Paginated(t *testing.T) {
+	var gotPath, gotPage, gotPerPage string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotPage = r.URL.Query().Get("page")
+		gotPerPage = r.URL.Query().Get("per_page")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"messages": [
+					{"id": "msg_1", "from": "sender@y.com", "subject": "Hi", "body": "Your code is 1234", "received_at": "2026-06-02T00:00:00+00:00", "read_at": null, "is_read": false}
+				],
+				"page": 2, "per_page": 10, "total": 15, "has_more": false
+			}
+		}`))
+	})
+
+	page, err := client.Emails.Messages(context.Background(), "eml_1", 2, 10)
+	if err != nil {
+		t.Fatalf("Messages returned error: %v", err)
+	}
+	if gotPath != "/api/account/emails/eml_1/messages" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotPage != "2" || gotPerPage != "10" {
+		t.Errorf("page/per_page query = %q/%q, want 2/10", gotPage, gotPerPage)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].ID != "msg_1" || page.Messages[0].IsRead {
+		t.Fatalf("messages = %#v", page.Messages)
+	}
+	if page.Page != 2 || page.PerPage != 10 || page.Total != 15 || page.HasMore {
+		t.Errorf("pagination = %#v", page)
+	}
+}
+
+func TestEmailsMessages_DefaultsPageAndPerPage(t *testing.T) {
+	var gotPage, gotPerPage string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPage = r.URL.Query().Get("page")
+		gotPerPage = r.URL.Query().Get("per_page")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": {"messages": [], "page": 1, "per_page": 20, "total": 0, "has_more": false}}`))
+	})
+
+	page, err := client.Emails.Messages(context.Background(), "eml_1", 0, 0)
+	if err != nil {
+		t.Fatalf("Messages returned error: %v", err)
+	}
+	if gotPage != "1" || gotPerPage != "20" {
+		t.Errorf("page/per_page query = %q/%q, want 1/20", gotPage, gotPerPage)
+	}
+	if page.Messages == nil {
+		t.Errorf("messages should be non-nil empty slice")
+	}
+}
+
+func TestEmailsMarkRead(t *testing.T) {
+	var gotPath, gotMethod string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": {"id": "msg_1", "read": true}}`))
+	})
+
+	res, err := client.Emails.MarkRead(context.Background(), "eml_1", "msg_1")
+	if err != nil {
+		t.Fatalf("MarkRead returned error: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/account/emails/eml_1/messages/msg_1/read" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if res.ID != "msg_1" || !res.Read {
+		t.Errorf("result = %#v", res)
 	}
 }
 

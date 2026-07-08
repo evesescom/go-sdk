@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strconv"
 )
 
 // EmailAddress is a rented inbox address / order.
@@ -37,6 +38,35 @@ type EmailOrder struct {
 	Messages []EmailMessage `json:"messages"`
 }
 
+// EmailInboxMessage is a single inbox message with its read state, as returned
+// by the paginated EmailsService.Messages endpoint. Body may be plain text or
+// HTML. ReadAt is empty until the message is marked read.
+type EmailInboxMessage struct {
+	ID         string `json:"id"`
+	From       string `json:"from"`
+	Subject    string `json:"subject"`
+	Body       string `json:"body"`
+	ReceivedAt string `json:"received_at,omitempty"`
+	ReadAt     string `json:"read_at,omitempty"`
+	IsRead     bool   `json:"is_read"`
+}
+
+// EmailMessagesPage is one page of inbox messages returned by
+// EmailsService.Messages.
+type EmailMessagesPage struct {
+	Messages []EmailInboxMessage `json:"messages"`
+	Page     int                 `json:"page"`
+	PerPage  int                 `json:"per_page"`
+	Total    int                 `json:"total"`
+	HasMore  bool                `json:"has_more"`
+}
+
+// EmailReadResult is the response of EmailsService.MarkRead.
+type EmailReadResult struct {
+	ID   string `json:"id"`
+	Read bool   `json:"read"`
+}
+
 // EmailDomain is a rentable domain with its user price and availability.
 type EmailDomain struct {
 	Provider   string `json:"provider"`
@@ -64,12 +94,18 @@ type EmailsService struct {
 	client *Client
 }
 
-// List returns the user's rented email addresses.
-func (s *EmailsService) List(ctx context.Context) ([]EmailAddress, error) {
+// List returns the user's rented email addresses. Released/cancelled addresses
+// are hidden by default; pass includeReleased=true to include them.
+func (s *EmailsService) List(ctx context.Context, includeReleased bool) ([]EmailAddress, error) {
+	q := url.Values{}
+	if includeReleased {
+		q.Set("include_released", "1")
+	}
 	var raw json.RawMessage
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
 		path:   "/api/account/emails",
+		query:  q,
 	}, &raw); err != nil {
 		return nil, err
 	}
@@ -245,6 +281,70 @@ func (s *EmailsService) Get(ctx context.Context, uuid string) (*EmailOrder, erro
 		order.Raw = rawMap
 	}
 	return &order, nil
+}
+
+// Messages returns one page of the inbox's received messages with their read
+// state. page defaults to 1 and perPage to 20 when <= 0.
+func (s *EmailsService) Messages(ctx context.Context, uuid string, page, perPage int) (*EmailMessagesPage, error) {
+	if uuid == "" {
+		return nil, &Error{Message: "uuid is required"}
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = 20
+	}
+	q := url.Values{}
+	q.Set("page", strconv.Itoa(page))
+	q.Set("per_page", strconv.Itoa(perPage))
+
+	var raw json.RawMessage
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   "/api/account/emails/" + url.PathEscape(uuid) + "/messages",
+		query:  q,
+	}, &raw); err != nil {
+		return nil, err
+	}
+	inner := unwrapData(raw)
+
+	var out EmailMessagesPage
+	if len(inner) > 0 {
+		if err := json.Unmarshal(inner, &out); err != nil {
+			return nil, &Error{Message: "decode email messages: " + err.Error()}
+		}
+	}
+	if out.Messages == nil {
+		out.Messages = []EmailInboxMessage{}
+	}
+	return &out, nil
+}
+
+// MarkRead marks a single inbox message as read.
+func (s *EmailsService) MarkRead(ctx context.Context, uuid, messageID string) (*EmailReadResult, error) {
+	if uuid == "" {
+		return nil, &Error{Message: "uuid is required"}
+	}
+	if messageID == "" {
+		return nil, &Error{Message: "messageID is required"}
+	}
+	var raw json.RawMessage
+	if err := s.client.do(ctx, requestOptions{
+		method: "POST",
+		path:   "/api/account/emails/" + url.PathEscape(uuid) + "/messages/" + url.PathEscape(messageID) + "/read",
+	}, &raw); err != nil {
+		return nil, err
+	}
+	inner := unwrapData(raw)
+
+	var out EmailReadResult
+	if len(inner) > 0 {
+		if err := json.Unmarshal(inner, &out); err != nil {
+			return nil, &Error{Message: "decode email read result: " + err.Error()}
+		}
+	}
+	return &out, nil
 }
 
 // Delete releases an address (soft cancel, no refund). The returned address

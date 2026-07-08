@@ -24,7 +24,7 @@ svcs, _  := client.Catalog.Services(ctx, &eveses.CatalogServicesParams{Mode: eve
 // New product lines:
 proxies, _ := client.Proxies.List(ctx)
 unblock, _ := client.WebUnblocker.List(ctx)
-inboxes, _ := client.Emails.List(ctx)
+inboxes, _ := client.Emails.List(ctx, false)
 ```
 
 `EVESES_API_KEY` should be a Sanctum API token (kind=`api_key`) issued from your Eveses dashboard. Never commit it — read it from the environment, a secret manager, or your platform's config store.
@@ -89,6 +89,7 @@ packages, _ := client.Proxies.Packages(ctx)      // residential GB price ladder
 catalog,  _ := client.Proxies.Catalog(ctx)       // static products/plans/locations
 locs,     _ := client.Proxies.Locations(ctx, "residential")
 usage,    _ := client.Proxies.Usage(ctx, "2026-06-01", "2026-06-30")
+endpoints, _ := client.Proxies.Endpoints(ctx)    // gateway regions + ports per protocol + protocols
 
 // Quote (residential GB)
 gb := 5.0
@@ -143,7 +144,7 @@ _, _ = client.WebUnblocker.ResumeSubscription(ctx)
 Rent an inbox address (our catch-all domains or a reseller) and read its mail.
 
 ```go
-emails,  _ := client.Emails.List(ctx)
+emails,  _ := client.Emails.List(ctx, false)        // released/cancelled hidden; pass true to include them
 domains, _ := client.Emails.Domains(ctx, "")        // "" = our catch-all domains; pass site for resellers
 quote,   _ := client.Emails.Quote(ctx, &eveses.EmailQuoteParams{Domain: "example.com"})
 
@@ -154,6 +155,11 @@ addr, _ := client.Emails.Purchase(ctx, &eveses.PurchaseEmailParams{
 // Get() live-syncs reseller inboxes — poll it for new mail.
 order, _ := client.Emails.Get(ctx, addr.UUID)
 for _, m := range order.Messages { fmt.Println(m.From, m.Subject, m.Body) }
+
+// Paginated inbox with read state
+page, _ := client.Emails.Messages(ctx, addr.UUID, 1, 20)
+for _, m := range page.Messages { fmt.Println(m.ID, m.From, m.Subject, m.IsRead) }
+_, _ = client.Emails.MarkRead(ctx, addr.UUID, page.Messages[0].ID)
 
 // Soft cancel (no refund) → status "cancelled"
 _, _ = client.Emails.Delete(ctx, addr.UUID)

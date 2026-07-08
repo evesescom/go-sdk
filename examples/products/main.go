@@ -89,7 +89,7 @@ func main() {
 	fmt.Printf("Quote for %d requests: %.2f %s (%d/1k)\n", wq.Requests, float64(wq.PriceCents)/100, wq.Currency, wq.Per1kCents)
 
 	// ── Emails ───────────────────────────────────────────────────────────
-	emails, err := client.Emails.List(ctx)
+	emails, err := client.Emails.List(ctx, false)
 	if err != nil {
 		handle(err)
 		return

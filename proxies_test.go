@@ -58,6 +58,48 @@ func TestProxiesList_HappyPath(t *testing.T) {
 	}
 }
 
+func TestProxiesEndpoints_HappyPath(t *testing.T) {
+	var gotPath, gotMethod string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"regions": [
+					{"code": "auto", "host": "proxy.eveses.com", "label": "Automatic (nearest)"},
+					{"code": "us", "host": "us.proxy.eveses.com", "label": "United States"}
+				],
+				"ports": {"http": [12321, 11200], "socks5": [32325, 51200]},
+				"protocols": ["http", "socks5"]
+			}
+		}`))
+	})
+
+	out, err := client.Proxies.Endpoints(context.Background())
+	if err != nil {
+		t.Fatalf("Endpoints returned error: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method = %q, want GET", gotMethod)
+	}
+	if gotPath != "/api/account/proxies/endpoints" {
+		t.Errorf("path = %q, want /api/account/proxies/endpoints", gotPath)
+	}
+	if len(out.Regions) != 2 || out.Regions[0].Code != "auto" || out.Regions[0].Host != "proxy.eveses.com" {
+		t.Fatalf("regions = %#v", out.Regions)
+	}
+	if len(out.Ports.HTTP) != 2 || out.Ports.HTTP[0] != 12321 {
+		t.Errorf("ports.http = %#v", out.Ports.HTTP)
+	}
+	if len(out.Ports.Socks5) != 2 || out.Ports.Socks5[1] != 51200 {
+		t.Errorf("ports.socks5 = %#v", out.Ports.Socks5)
+	}
+	if len(out.Protocols) != 2 || out.Protocols[1] != "socks5" {
+		t.Errorf("protocols = %#v", out.Protocols)
+	}
+}
+
 func TestProxiesQuote_StaticSelection(t *testing.T) {
 	var gotType, gotProductID, gotQuantity string
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

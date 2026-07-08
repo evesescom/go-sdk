@@ -144,6 +144,28 @@ type ProxyUsage struct {
 	Raw  map[string]any `json:"-"`
 }
 
+// ProxyRegion is one selectable connection region for the shared proxy
+// gateway. Code "auto" routes to the nearest region.
+type ProxyRegion struct {
+	Code  string `json:"code"`
+	Host  string `json:"host"`
+	Label string `json:"label"`
+}
+
+// ProxyEndpointPorts lists the available gateway ports per protocol.
+type ProxyEndpointPorts struct {
+	HTTP   []int `json:"http"`
+	Socks5 []int `json:"socks5"`
+}
+
+// ProxyEndpoints is the response of ProxiesService.Endpoints: the connectable
+// regions, the ports per protocol, and the supported protocols.
+type ProxyEndpoints struct {
+	Regions   []ProxyRegion      `json:"regions"`
+	Ports     ProxyEndpointPorts `json:"ports"`
+	Protocols []string           `json:"protocols"`
+}
+
 // ProxiesService wraps /api/account/proxies.
 type ProxiesService struct {
 	client *Client
@@ -169,6 +191,39 @@ func (s *ProxiesService) List(ctx context.Context) (*ProxyOverview, error) {
 	}
 	if out.Orders == nil {
 		out.Orders = []ProxyOrder{}
+	}
+	return &out, nil
+}
+
+// Endpoints returns the shared proxy gateway connection details: the
+// selectable regions, ports per protocol, and supported protocols.
+func (s *ProxiesService) Endpoints(ctx context.Context) (*ProxyEndpoints, error) {
+	var raw json.RawMessage
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   "/api/account/proxies/endpoints",
+	}, &raw); err != nil {
+		return nil, err
+	}
+	inner := unwrapData(raw)
+
+	var out ProxyEndpoints
+	if len(inner) > 0 {
+		if err := json.Unmarshal(inner, &out); err != nil {
+			return nil, &Error{Message: "decode proxy endpoints: " + err.Error()}
+		}
+	}
+	if out.Regions == nil {
+		out.Regions = []ProxyRegion{}
+	}
+	if out.Ports.HTTP == nil {
+		out.Ports.HTTP = []int{}
+	}
+	if out.Ports.Socks5 == nil {
+		out.Ports.Socks5 = []int{}
+	}
+	if out.Protocols == nil {
+		out.Protocols = []string{}
 	}
 	return &out, nil
 }
