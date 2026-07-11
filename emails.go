@@ -2,382 +2,233 @@ package eveses
 
 import (
 	"context"
-	"encoding/json"
 	"net/url"
 	"strconv"
 )
 
-// EmailAddress is a rented inbox address / order.
-type EmailAddress struct {
-	UUID         string         `json:"uuid"`
-	Address      string         `json:"address"`
-	Domain       string         `json:"domain"`
-	Site         string         `json:"site,omitempty"`
-	Status       string         `json:"status"`
-	PriceCents   int            `json:"price_cents"`
-	Currency     string         `json:"currency"`
-	MessageCount int            `json:"message_count"`
-	ExpiresAt    string         `json:"expires_at,omitempty"`
-	CreatedAt    string         `json:"created_at,omitempty"`
-	Raw          map[string]any `json:"-"`
-}
-
-// EmailMessage is a single received message. Body may be plain text or HTML;
-// there is no id or read flag.
-type EmailMessage struct {
-	From       string `json:"from"`
-	Subject    string `json:"subject"`
-	Body       string `json:"body"`
-	ReceivedAt string `json:"received_at,omitempty"`
-}
-
-// EmailOrder is an inbox address together with its received messages, as
-// returned by EmailsService.Get. It embeds EmailAddress.
-type EmailOrder struct {
-	EmailAddress
-	Messages []EmailMessage `json:"messages"`
-}
-
-// EmailInboxMessage is a single inbox message with its read state, as returned
-// by the paginated EmailsService.Messages endpoint. Body may be plain text or
-// HTML. ReadAt is empty until the message is marked read.
-type EmailInboxMessage struct {
-	ID         string `json:"id"`
-	From       string `json:"from"`
-	Subject    string `json:"subject"`
-	Body       string `json:"body"`
-	ReceivedAt string `json:"received_at,omitempty"`
-	ReadAt     string `json:"read_at,omitempty"`
-	IsRead     bool   `json:"is_read"`
-}
-
-// EmailMessagesPage is one page of inbox messages returned by
-// EmailsService.Messages.
-type EmailMessagesPage struct {
-	Messages []EmailInboxMessage `json:"messages"`
-	Page     int                 `json:"page"`
-	PerPage  int                 `json:"per_page"`
-	Total    int                 `json:"total"`
-	HasMore  bool                `json:"has_more"`
-}
-
-// EmailReadResult is the response of EmailsService.MarkRead.
-type EmailReadResult struct {
-	ID   string `json:"id"`
-	Read bool   `json:"read"`
-}
-
-// EmailDomain is a rentable domain with its user price and availability.
+// EmailDomain is a single email domain entry returned by Emails.Domains.
 type EmailDomain struct {
-	Provider   string `json:"provider"`
-	Domain     string `json:"domain"`
-	PriceCents int    `json:"price_cents"`
-	Available  bool   `json:"available"`
+	Domain   string `json:"domain"`
+	Site     string `json:"site,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Price    any    `json:"price,omitempty"`
 }
 
-// EmailDomainsResponse is the response of EmailsService.Domains.
-type EmailDomainsResponse struct {
-	Domains  []EmailDomain `json:"domains"`
-	Currency string        `json:"currency"`
-}
-
-// EmailQuote is the response of EmailsService.Quote.
+// EmailQuote is a pre-purchase price estimate returned by Emails.Quote.
 type EmailQuote struct {
-	Domain     string `json:"domain"`
-	Provider   string `json:"provider,omitempty"`
-	PriceCents int    `json:"price_cents"`
-	Currency   string `json:"currency"`
+	Domain     string         `json:"domain"`
+	Site       string         `json:"site,omitempty"`
+	Provider   string         `json:"provider,omitempty"`
+	PriceCents int            `json:"price_cents"`
+	Currency   string         `json:"currency,omitempty"`
+	Raw        map[string]any `json:"-"`
+}
+
+// EmailMessage is a single inbound message on a rented email.
+type EmailMessage struct {
+	ID         string `json:"id"`
+	From       string `json:"from,omitempty"`
+	Subject    string `json:"subject,omitempty"`
+	Body       string `json:"body,omitempty"`
+	ReceivedAt string `json:"received_at,omitempty"`
+	Read       bool   `json:"read"`
+}
+
+// EmailOrder is a rented email mailbox returned by Emails.Purchase / Get /
+// List.
+type EmailOrder struct {
+	UUID      string `json:"uuid"`
+	Email     string `json:"email,omitempty"`
+	Domain    string `json:"domain,omitempty"`
+	Site      string `json:"site,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Status    string `json:"status"`
+	Released  bool   `json:"released"`
+	Price     int    `json:"price_cents,omitempty"`
+	Currency  string `json:"currency,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
 }
 
 // EmailsService wraps /api/account/emails.
+//
+// It covers domain discovery, quoting, purchasing, listing, reading
+// individual mailboxes and their messages, marking messages read, and
+// releasing (deleting) a mailbox.
 type EmailsService struct {
 	client *Client
 }
 
-// List returns the user's rented email addresses. Released/cancelled addresses
-// are hidden by default; pass includeReleased=true to include them.
-func (s *EmailsService) List(ctx context.Context, includeReleased bool) ([]EmailAddress, error) {
-	q := url.Values{}
-	if includeReleased {
-		q.Set("include_released", "1")
-	}
-	var raw json.RawMessage
-	if err := s.client.do(ctx, requestOptions{
-		method: "GET",
-		path:   "/api/account/emails",
-		query:  q,
-	}, &raw); err != nil {
-		return nil, err
-	}
-	inner := unwrapData(raw)
-
-	var out struct {
-		Emails []EmailAddress `json:"emails"`
-	}
-	if len(inner) > 0 {
-		if err := json.Unmarshal(inner, &out); err != nil {
-			return nil, &Error{Message: "decode emails: " + err.Error()}
-		}
-	}
-	if out.Emails == nil {
-		out.Emails = []EmailAddress{}
-	}
-	for i := range out.Emails {
-		if out.Emails[i].Currency == "" {
-			out.Emails[i].Currency = "USD"
-		}
-	}
-	return out.Emails, nil
-}
-
-// Domains lists rentable domains with user prices. site scopes reseller
-// providers; pass "" for our own catch-all domains.
-func (s *EmailsService) Domains(ctx context.Context, site string) (*EmailDomainsResponse, error) {
+// Domains returns available email domains, optionally filtered by site.
+// site is optional; it is omitted from the query when empty.
+func (s *EmailsService) Domains(ctx context.Context, site string) (map[string]any, error) {
 	q := url.Values{}
 	if site != "" {
 		q.Set("site", site)
 	}
-	var raw json.RawMessage
-	if err := s.client.do(ctx, requestOptions{
-		method: "GET",
-		path:   "/api/account/emails/domains",
-		query:  q,
-	}, &raw); err != nil {
-		return nil, err
-	}
-	inner := unwrapData(raw)
-
-	var out EmailDomainsResponse
-	if len(inner) > 0 {
-		if err := json.Unmarshal(inner, &out); err != nil {
-			return nil, &Error{Message: "decode email domains: " + err.Error()}
-		}
-	}
-	if out.Domains == nil {
-		out.Domains = []EmailDomain{}
-	}
-	out.Currency = defaultCurrency(out.Currency)
-	return &out, nil
+	return s.getMap(ctx, "/api/account/emails/domains", q)
 }
 
-// EmailQuoteParams configures EmailsService.Quote. Domain is required; Site and
-// Provider are optional (needed for reseller providers).
-type EmailQuoteParams struct {
-	Domain   string
-	Site     string
-	Provider string
-}
-
-// Quote prices a concrete domain pick before renting.
-func (s *EmailsService) Quote(ctx context.Context, p *EmailQuoteParams) (*EmailQuote, error) {
-	if p == nil {
-		return nil, &Error{Message: "params is required"}
-	}
-	if p.Domain == "" {
-		return nil, &Error{Message: "Domain is required"}
-	}
+// Quote estimates the cost of renting an email address before committing.
+func (s *EmailsService) Quote(ctx context.Context, domain, site, provider string) (*EmailQuote, error) {
 	q := url.Values{}
-	q.Set("domain", p.Domain)
-	if p.Site != "" {
-		q.Set("site", p.Site)
-	}
-	if p.Provider != "" {
-		q.Set("provider", p.Provider)
-	}
-	var raw json.RawMessage
-	if err := s.client.do(ctx, requestOptions{
-		method: "GET",
-		path:   "/api/account/emails/quote",
-		query:  q,
-	}, &raw); err != nil {
+	q.Set("domain", domain)
+	q.Set("site", site)
+	q.Set("provider", provider)
+
+	raw, err := s.getMap(ctx, "/api/account/emails/quote", q)
+	if err != nil {
 		return nil, err
 	}
-	inner := unwrapData(raw)
-
-	var quote EmailQuote
-	if len(inner) > 0 {
-		if err := json.Unmarshal(inner, &quote); err != nil {
-			return nil, &Error{Message: "decode email quote: " + err.Error()}
+	quote := &EmailQuote{Raw: raw}
+	if v, ok := raw["domain"]; ok {
+		if str, ok := v.(string); ok {
+			quote.Domain = str
 		}
 	}
-	quote.Currency = defaultCurrency(quote.Currency)
-	return &quote, nil
+	if v, ok := raw["site"]; ok {
+		if str, ok := v.(string); ok {
+			quote.Site = str
+		}
+	}
+	if v, ok := raw["provider"]; ok {
+		if str, ok := v.(string); ok {
+			quote.Provider = str
+		}
+	}
+	if v, ok := raw["price_cents"]; ok {
+		if n, ok := toInt(v); ok {
+			quote.PriceCents = n
+		}
+	}
+	if v, ok := raw["currency"]; ok {
+		if str, ok := v.(string); ok {
+			quote.Currency = str
+		}
+	}
+	return quote, nil
 }
 
-// PurchaseEmailParams configures EmailsService.Purchase. Domain is required;
-// Site and Provider are optional. When IdempotencyKey is set it is sent as the
-// Idempotency-Key HTTP header.
-type PurchaseEmailParams struct {
-	Domain         string
-	Site           string
-	Provider       string
-	IdempotencyKey string
-}
-
-// Purchase rents an inbox address and returns the created address (HTTP 201).
-func (s *EmailsService) Purchase(ctx context.Context, p *PurchaseEmailParams) (*EmailAddress, error) {
-	if p == nil {
-		return nil, &Error{Message: "params is required"}
-	}
-	if p.Domain == "" {
-		return nil, &Error{Message: "Domain is required"}
-	}
-
-	body := map[string]any{"domain": p.Domain}
-	if p.Site != "" {
-		body["site"] = p.Site
-	}
-	if p.Provider != "" {
-		body["provider"] = p.Provider
+// Purchase rents an email address. idempotencyKey, when non-empty, is
+// forwarded as an Idempotency-Key header so replays return the same order.
+func (s *EmailsService) Purchase(ctx context.Context, domain, site, provider, idempotencyKey string) (*EmailOrder, error) {
+	body := map[string]any{
+		"domain":   domain,
+		"site":     site,
+		"provider": provider,
 	}
 
 	headers := map[string]string{}
-	if p.IdempotencyKey != "" {
-		headers["Idempotency-Key"] = p.IdempotencyKey
+	if idempotencyKey != "" {
+		headers["Idempotency-Key"] = idempotencyKey
 	}
 
-	var raw json.RawMessage
+	var order EmailOrder
 	if err := s.client.do(ctx, requestOptions{
 		method:  "POST",
 		path:    "/api/account/emails/purchase",
 		body:    body,
 		headers: headers,
-	}, &raw); err != nil {
+	}, &order); err != nil {
 		return nil, err
-	}
-	return decodeEmailAddress(raw)
-}
-
-// Get fetches one address and its received messages. This call also live-syncs
-// reseller inboxes from the provider, so it is the inbox refresh mechanism —
-// poll it to check for new mail.
-func (s *EmailsService) Get(ctx context.Context, uuid string) (*EmailOrder, error) {
-	if uuid == "" {
-		return nil, &Error{Message: "uuid is required"}
-	}
-	var raw json.RawMessage
-	if err := s.client.do(ctx, requestOptions{
-		method: "GET",
-		path:   "/api/account/emails/" + url.PathEscape(uuid),
-	}, &raw); err != nil {
-		return nil, err
-	}
-	inner := unwrapData(raw)
-
-	var order EmailOrder
-	if len(inner) > 0 {
-		if err := json.Unmarshal(inner, &order); err != nil {
-			return nil, &Error{Message: "decode email order: " + err.Error()}
-		}
 	}
 	if order.Currency == "" {
 		order.Currency = "USD"
 	}
-	if order.Messages == nil {
-		order.Messages = []EmailMessage{}
+	return &order, nil
+}
+
+// List returns the user's rented email orders. Set includeReleased to true
+// to also return released (expired) mailboxes.
+func (s *EmailsService) List(ctx context.Context, includeReleased bool) ([]EmailOrder, error) {
+	q := url.Values{}
+	if includeReleased {
+		q.Set("include_released", "1")
 	}
-	var rawMap map[string]any
-	if err := json.Unmarshal(inner, &rawMap); err == nil {
-		order.Raw = rawMap
+
+	var out []EmailOrder
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   "/api/account/emails",
+		query:  q,
+	}, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []EmailOrder{}
+	}
+	return out, nil
+}
+
+// Get returns a single rented email mailbox by UUID.
+func (s *EmailsService) Get(ctx context.Context, uuid string) (*EmailOrder, error) {
+	var order EmailOrder
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   "/api/account/emails/" + url.PathEscape(uuid),
+	}, &order); err != nil {
+		return nil, err
+	}
+	if order.Currency == "" {
+		order.Currency = "USD"
 	}
 	return &order, nil
 }
 
-// Messages returns one page of the inbox's received messages with their read
-// state. page defaults to 1 and perPage to 20 when <= 0.
-func (s *EmailsService) Messages(ctx context.Context, uuid string, page, perPage int) (*EmailMessagesPage, error) {
-	if uuid == "" {
-		return nil, &Error{Message: "uuid is required"}
-	}
-	if page <= 0 {
-		page = 1
-	}
-	if perPage <= 0 {
-		perPage = 20
-	}
+// Messages returns the paginated inbox for a rented email mailbox. page and
+// perPage are optional (pass 0 to use API defaults).
+func (s *EmailsService) Messages(ctx context.Context, uuid string, page, perPage int) ([]EmailMessage, error) {
 	q := url.Values{}
-	q.Set("page", strconv.Itoa(page))
-	q.Set("per_page", strconv.Itoa(perPage))
+	if page > 0 {
+		q.Set("page", strconv.Itoa(page))
+	}
+	if perPage > 0 {
+		q.Set("per_page", strconv.Itoa(perPage))
+	}
 
-	var raw json.RawMessage
+	var out []EmailMessage
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
 		path:   "/api/account/emails/" + url.PathEscape(uuid) + "/messages",
 		query:  q,
-	}, &raw); err != nil {
+	}, &out); err != nil {
 		return nil, err
 	}
-	inner := unwrapData(raw)
-
-	var out EmailMessagesPage
-	if len(inner) > 0 {
-		if err := json.Unmarshal(inner, &out); err != nil {
-			return nil, &Error{Message: "decode email messages: " + err.Error()}
-		}
+	if out == nil {
+		out = []EmailMessage{}
 	}
-	if out.Messages == nil {
-		out.Messages = []EmailInboxMessage{}
-	}
-	return &out, nil
+	return out, nil
 }
 
-// MarkRead marks a single inbox message as read.
-func (s *EmailsService) MarkRead(ctx context.Context, uuid, messageID string) (*EmailReadResult, error) {
-	if uuid == "" {
-		return nil, &Error{Message: "uuid is required"}
-	}
-	if messageID == "" {
-		return nil, &Error{Message: "messageID is required"}
-	}
-	var raw json.RawMessage
-	if err := s.client.do(ctx, requestOptions{
+// MarkRead marks a specific message as read on a rented email mailbox.
+func (s *EmailsService) MarkRead(ctx context.Context, uuid, messageID string) error {
+	return s.client.do(ctx, requestOptions{
 		method: "POST",
 		path:   "/api/account/emails/" + url.PathEscape(uuid) + "/messages/" + url.PathEscape(messageID) + "/read",
-	}, &raw); err != nil {
-		return nil, err
-	}
-	inner := unwrapData(raw)
-
-	var out EmailReadResult
-	if len(inner) > 0 {
-		if err := json.Unmarshal(inner, &out); err != nil {
-			return nil, &Error{Message: "decode email read result: " + err.Error()}
-		}
-	}
-	return &out, nil
+	}, nil)
 }
 
-// Delete releases an address (soft cancel, no refund). The returned address
-// has Status = "cancelled".
-func (s *EmailsService) Delete(ctx context.Context, uuid string) (*EmailAddress, error) {
-	if uuid == "" {
-		return nil, &Error{Message: "uuid is required"}
-	}
-	var raw json.RawMessage
-	if err := s.client.do(ctx, requestOptions{
+// Release deletes / releases a rented email mailbox. The mailbox is
+// deactivated and can no longer receive messages.
+func (s *EmailsService) Release(ctx context.Context, uuid string) error {
+	return s.client.do(ctx, requestOptions{
 		method: "DELETE",
 		path:   "/api/account/emails/" + url.PathEscape(uuid),
-	}, &raw); err != nil {
-		return nil, err
-	}
-	return decodeEmailAddress(raw)
+	}, nil)
 }
 
-func decodeEmailAddress(raw json.RawMessage) (*EmailAddress, error) {
-	inner := unwrapData(raw)
-	if len(inner) == 0 {
-		return &EmailAddress{Currency: "USD"}, nil
+// getMap issues a GET and returns the decoded JSON object as a map.
+func (s *EmailsService) getMap(ctx context.Context, path string, query url.Values) (map[string]any, error) {
+	var out map[string]any
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   path,
+		query:  query,
+	}, &out); err != nil {
+		return nil, err
 	}
-	var addr EmailAddress
-	if err := json.Unmarshal(inner, &addr); err != nil {
-		return nil, &Error{Message: "decode email address: " + err.Error()}
+	if out == nil {
+		out = map[string]any{}
 	}
-	if addr.Currency == "" {
-		addr.Currency = "USD"
-	}
-	var rawMap map[string]any
-	if err := json.Unmarshal(inner, &rawMap); err == nil {
-		addr.Raw = rawMap
-	}
-	return &addr, nil
+	return out, nil
 }

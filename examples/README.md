@@ -8,7 +8,6 @@ its own subdirectory with `package main` so they compile independently.
 | `examples/quickstart/` | Construct the client, check wallet balance, list services, buy ONE activation with an idempotency key. |
 | `examples/buy-and-poll/` | Full activation lifecycle: create → poll SMS every 5s for 5 min → `Finish()` (or `Cancel()` on Ctrl-C / timeout). |
 | `examples/webhook-server/` | Minimal `net/http` server that verifies `X-Eveses-Signature` with `eveses.VerifyWebhook` and prints the parsed payload. |
-| `examples/products/` | Browse the proxies, web-unblocker and emails product lines (list + quote, read-only). |
 
 ## Prerequisites
 
@@ -29,7 +28,6 @@ Run any example:
 go run ./examples/quickstart
 go run ./examples/buy-and-poll
 go run ./examples/webhook-server
-go run ./examples/products
 ```
 
 Build them all to check for compilation errors:

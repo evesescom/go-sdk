@@ -34,9 +34,9 @@ const (
 	// DefaultTimeout matches the JS / Python / PHP SDKs.
 	DefaultTimeout = 30 * time.Second
 	// DefaultUserAgent identifies SDK + version on every request.
-	DefaultUserAgent = "eveses-go/0.2.0"
+	DefaultUserAgent = "eveses-go/0.3.0"
 	// Version is the SDK semver.
-	Version = "0.2.0"
+	Version = "0.3.0"
 )
 
 // Config configures a Client. Only APIKey is required; the rest fall back
@@ -74,9 +74,12 @@ type Client struct {
 	Activations  *ActivationsService
 	Wallet       *WalletService
 	Catalog      *CatalogService
-	Proxies      *ProxiesService
+	Captcha      *CaptchaService
+	Fingerprints *FingerprintsService
+	Proxy        *ProxyService
 	WebUnblocker *WebUnblockerService
 	Emails       *EmailsService
+	Trial        *TrialService
 }
 
 // New constructs a Client from Config. Returns an error iff APIKey is empty.
@@ -115,9 +118,12 @@ func New(cfg Config) (*Client, error) {
 	c.Activations = &ActivationsService{client: c}
 	c.Wallet = &WalletService{client: c}
 	c.Catalog = &CatalogService{client: c}
-	c.Proxies = &ProxiesService{client: c}
+	c.Captcha = &CaptchaService{client: c}
+	c.Fingerprints = &FingerprintsService{client: c}
+	c.Proxy = &ProxyService{client: c}
 	c.WebUnblocker = &WebUnblockerService{client: c}
 	c.Emails = &EmailsService{client: c}
+	c.Trial = &TrialService{client: c}
 	return c, nil
 }
 

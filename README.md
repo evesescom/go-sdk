@@ -20,11 +20,6 @@ order, _ := client.Activations.Create(ctx, &eveses.CreateActivationParams{Countr
 sms, _   := client.Activations.Sms(ctx, order.OrderID)
 bal, _   := client.Wallet.Balance(ctx)
 svcs, _  := client.Catalog.Services(ctx, &eveses.CatalogServicesParams{Mode: eveses.OrderModeActivation, Country: "ua"})
-
-// New product lines:
-proxies, _ := client.Proxies.List(ctx)
-unblock, _ := client.WebUnblocker.List(ctx)
-inboxes, _ := client.Emails.List(ctx, false)
 ```
 
 `EVESES_API_KEY` should be a Sanctum API token (kind=`api_key`) issued from your Eveses dashboard. Never commit it — read it from the environment, a secret manager, or your platform's config store.
@@ -79,90 +74,111 @@ pricing, _ := client.Catalog.Pricing(ctx, &eveses.CatalogPricingParams{
 
 The `Service` field on `CatalogPricingParams` is the friendlier name for the wire param `product`; the SDK translates it for you. Same for `DurationMinutes` → `duration`.
 
-## Proxies
+## Proxy
 
-Residential (metered/GB) and static (per-IP: ISP, datacenter, IPv6, mobile, sneaker) proxies. Money is integer cents; traffic is GB (float).
+Residential (metered, per-GB) and static (per-IP: ISP, datacenter, IPv6, sneaker, mobile) proxies. Read the catalogue, quote, buy, list, extend, auto-renew, reset sessions, view usage, and manage the residential subscription.
 
 ```go
-overview, _ := client.Proxies.List(ctx)          // residential access + subscription + orders
-packages, _ := client.Proxies.Packages(ctx)      // residential GB price ladder
-catalog,  _ := client.Proxies.Catalog(ctx)       // static products/plans/locations
-locs,     _ := client.Proxies.Locations(ctx, "residential")
-usage,    _ := client.Proxies.Usage(ctx, "2026-06-01", "2026-06-30")
-endpoints, _ := client.Proxies.Endpoints(ctx)    // gateway regions + ports per protocol + protocols
+// Catalogue / connection info
+pkgs, _   := client.Proxy.Packages(ctx)                                 // residential GB ladder
+eps, _    := client.Proxy.Endpoints(ctx)                                // white-label entry subdomains + ports
+cat, _    := client.Proxy.Catalog(ctx)                                  // static (per-IP) products/plans
+locs, _   := client.Proxy.Locations(ctx, eveses.ProxyTypeResidential)   // targeting
 
-// Quote (residential GB)
-gb := 5.0
-quote, _ := client.Proxies.Quote(ctx, &eveses.ProxyQuoteParams{Type: "residential", GB: &gb, Subscription: true})
-
-// Purchase (residential top-up) with idempotency
-order, _ := client.Proxies.Purchase(ctx, &eveses.PurchaseProxyParams{
-    Type: "residential", GB: &gb, Subscription: true, IdempotencyKey: "abc-123",
+// Quote + purchase residential GB
+q, _ := client.Proxy.Quote(ctx, &eveses.ProxyQuoteParams{Type: eveses.ProxyTypeResidential, GB: 5})
+order, _ := client.Proxy.Purchase(ctx, &eveses.ProxyPurchaseParams{
+    Type: eveses.ProxyTypeResidential, GB: 5, IdempotencyKey: "abc-123",
 })
 
-// Static per-IP purchase
-pid, plan, loc, qty := 7, 3, 11, 2
-staticOrder, _ := client.Proxies.Purchase(ctx, &eveses.PurchaseProxyParams{
-    Type: "isp", ProductID: &pid, PlanID: &plan, LocationID: &loc, Quantity: &qty,
+// Or buy static IPs via a product/plan/location selection
+_, _ = client.Proxy.Purchase(ctx, &eveses.ProxyPurchaseParams{
+    Type:      eveses.ProxyTypeISP,
+    Selection: &eveses.ProxyStaticSelection{ProductID: 1, PlanID: 2, LocationID: 3, Quantity: 2},
 })
 
-// Per-IP order management
-_, _ = client.Proxies.Extend(ctx, staticOrder.UUID, 30)
-_, _ = client.Proxies.AutoRenew(ctx, staticOrder.UUID, true)
+list, _ := client.Proxy.List(ctx)                      // residential sub-user + subscription + per-IP orders
+_, _ = client.Proxy.Extend(ctx, order.UUID, 30)        // renew a per-IP order
+_, _ = client.Proxy.AutoRenew(ctx, order.UUID, true)   // toggle auto-extend
+_ = client.Proxy.ResetSessions(ctx)                    // rotate residential sticky sessions
+usage, _ := client.Proxy.Usage(ctx, "2026-06-01", "2026-06-30")
+_, _ = client.Proxy.Trial(ctx)                         // one-time free trial
 
-// Residential subscription
-_, _ = client.Proxies.CancelSubscription(ctx)
-_, _ = client.Proxies.PauseSubscription(ctx)
-_, _ = client.Proxies.ResumeSubscription(ctx)
-
-// Reset residential sticky sessions (next request rotates IPs)
-_ = client.Proxies.ResetSessions(ctx)
+// Residential subscription lifecycle
+_, _ = client.Proxy.SubscriptionCancel(ctx)
+_, _ = client.Proxy.SubscriptionPause(ctx)
+_, _ = client.Proxy.SubscriptionResume(ctx)
 ```
 
-`ProxyQuote` decodes leniently — commonly-present fields (`PriceCents`, `Currency`, `DiscountPct`, …) are promoted; the full payload is on `.Raw`.
+## WebUnblocker
 
-## Web Unblocker
-
-Anti-bot scraping endpoint billed per successful request. Separate product from proxies.
+Request-metered Web Unblocker access. Packages, quoting, purchasing, trial, access/quota checks, and subscription lifecycle.
 
 ```go
-overview, _ := client.WebUnblocker.List(ctx)        // access + quota + subscription + orders
-packages, _ := client.WebUnblocker.Packages(ctx)    // request-bundle price ladder
-quote,    _ := client.WebUnblocker.Quote(ctx, 25000, false)
+pkgs, _ := client.WebUnblocker.Packages(ctx)
+q, _    := client.WebUnblocker.Quote(ctx, 10000, false)              // requests, subscription
+order, _ := client.WebUnblocker.Purchase(ctx, 10000, false, "abc-123") // requests, subscription, idempotencyKey
+_, _ = client.WebUnblocker.Trial(ctx)                                // one-time free trial
 
-order, _ := client.WebUnblocker.Purchase(ctx, &eveses.PurchaseWebUnblockerParams{
-    Requests: 10000, Subscription: true, IdempotencyKey: "abc-123",
-})
+access, _ := client.WebUnblocker.Access(ctx)                         // credentials + quota + orders
+fmt.Println(access.Host, access.Port, access.Username, access.RequestsLeft)
 
-_, _ = client.WebUnblocker.CancelSubscription(ctx)
-_, _ = client.WebUnblocker.PauseSubscription(ctx)
-_, _ = client.WebUnblocker.ResumeSubscription(ctx)
+_, _ = client.WebUnblocker.SubscriptionCancel(ctx)
+_, _ = client.WebUnblocker.SubscriptionPause(ctx)
+_, _ = client.WebUnblocker.SubscriptionResume(ctx)
 ```
 
 ## Emails
 
-Rent an inbox address (our catch-all domains or a reseller) and read its mail.
+Rent disposable email mailboxes and read their inbound messages.
 
 ```go
-emails,  _ := client.Emails.List(ctx, false)        // released/cancelled hidden; pass true to include them
-domains, _ := client.Emails.Domains(ctx, "")        // "" = our catch-all domains; pass site for resellers
-quote,   _ := client.Emails.Quote(ctx, &eveses.EmailQuoteParams{Domain: "example.com"})
+domains, _ := client.Emails.Domains(ctx, "")                          // optional site filter
+q, _       := client.Emails.Quote(ctx, "example.com", "site", "provider")
+order, _   := client.Emails.Purchase(ctx, "example.com", "site", "provider", "abc-123")
 
-addr, _ := client.Emails.Purchase(ctx, &eveses.PurchaseEmailParams{
-    Domain: "example.com", IdempotencyKey: "abc-123",
+orders, _  := client.Emails.List(ctx, false)                          // includeReleased
+mailbox, _ := client.Emails.Get(ctx, order.UUID)
+msgs, _    := client.Emails.Messages(ctx, order.UUID, 1, 20)          // uuid, page, perPage
+for _, m := range msgs { fmt.Println(m.From, m.Subject) }
+
+_ = client.Emails.MarkRead(ctx, order.UUID, msgs[0].ID)
+_ = client.Emails.Release(ctx, order.UUID)                            // delete the mailbox
+```
+
+## Captcha
+
+Pay-per-use captcha solving (count-on-success). `Solve` submits the task and blocks, polling until the result is ready, failed, or the timeout elapses.
+
+```go
+sol, err := client.Captcha.Solve(ctx, "recaptcha_v2", map[string]any{
+    "sitekey": "6Le-...",
+    "url":     "https://example.com",
+}, &eveses.CaptchaSolveParams{TimeoutSec: 180})
+if err != nil { log.Fatal(err) }
+fmt.Println(sol.Solution)
+```
+
+## Fingerprints
+
+Pay-per-use browser-fingerprint generation (count-on-success). Synchronous — one request returns a complete fingerprint.
+
+```go
+fp, _ := client.Fingerprints.Generate(ctx, map[string]any{
+    "format": "chrome", "country": "us",
 })
+rnd, _ := client.Fingerprints.Random(ctx, nil)
+fmt.Println(fp.Payload, fp.PriceMicroUSD)
+```
 
-// Get() live-syncs reseller inboxes — poll it for new mail.
-order, _ := client.Emails.Get(ctx, addr.UUID)
-for _, m := range order.Messages { fmt.Println(m.From, m.Subject, m.Body) }
+## Trial
 
-// Paginated inbox with read state
-page, _ := client.Emails.Messages(ctx, addr.UUID, 1, 20)
-for _, m := range page.Messages { fmt.Println(m.ID, m.From, m.Subject, m.IsRead) }
-_, _ = client.Emails.MarkRead(ctx, addr.UUID, page.Messages[0].ID)
+Inspect the account's trial state and subscribe to trial-eligible services.
 
-// Soft cancel (no refund) → status "cancelled"
-_, _ = client.Emails.Delete(ctx, addr.UUID)
+```go
+st, _ := client.Trial.Status(ctx)
+fmt.Println(st.Active, st.Services)
+_, _ = client.Trial.Subscribe(ctx, []string{"web-unblocker", "proxies"})
 ```
 
 ## Webhooks
@@ -245,6 +261,22 @@ client, _ := eveses.New(eveses.Config{
 - **Idempotency**: when `IdempotencyKey` is set on `CreateActivationParams`, it is sent both in the JSON body and as the `Idempotency-Key` HTTP header.
 - **Envelope unwrap**: responses of the form `{"data": {...}}` are auto-unwrapped; raw `{...}` objects are accepted too.
 - **Concurrent use**: `*Client` is safe to share across goroutines.
+
+## Changelog
+
+### 0.3.0
+
+- **Proxy** (`client.Proxy`) — residential (per-GB) and static (per-IP: ISP, datacenter, IPv6, sneaker, mobile) proxies: `Packages`, `Endpoints`, `Catalog`, `Locations`, `Quote`, `Purchase`, `List`, `Extend`, `AutoRenew`, `ResetSessions`, `Usage`, `Trial`, and residential subscription control (`SubscriptionCancel` / `SubscriptionPause` / `SubscriptionResume`).
+- **WebUnblocker** (`client.WebUnblocker`) — `Packages`, `Quote`, `Purchase`, `Trial`, `Access`, and subscription lifecycle (`SubscriptionCancel` / `SubscriptionPause` / `SubscriptionResume`).
+- **Emails** (`client.Emails`) — rentable disposable mailboxes: `Domains`, `Quote`, `Purchase`, `List`, `Get`, `Messages`, `MarkRead`, `Release`.
+- **Captcha** (`client.Captcha`) — pay-per-use captcha solving with a blocking, self-polling `Solve`.
+- **Fingerprints** (`client.Fingerprints`) — pay-per-use synchronous browser-fingerprint generation: `Generate`, `Random`.
+- **Trial** (`client.Trial`) — `Status`, `Subscribe`.
+- Renamed the previous `proxies` / `web_unblocker` modules to `proxy` / `webunblocker` with a fuller, typed API surface.
+
+### 0.2.0
+
+- Activations, Wallet, Catalog, Emails modules; webhook signature verification; typed error mapping; automatic 429 retry.
 
 ## License
 
