@@ -36,7 +36,7 @@ type ProxyQuote struct {
 	Raw map[string]any `json:"-"`
 }
 
-// ProxyOrder is a proxy order returned by Proxy.Purchase / List / Extend /
+// ProxyOrder is a proxy order returned by Proxy.Buy / List / Get / Extend /
 // AutoRenew. The user-facing payload never leaks the provider cost.
 type ProxyOrder struct {
 	UUID       string         `json:"uuid"`
@@ -85,6 +85,9 @@ type ProxyList struct {
 	Orders       []ProxyOrder       `json:"orders"`
 }
 
+const proxyBase = "/api/v1/proxy"
+const proxyOrdersPath = proxyBase + "/orders"
+
 // ProxyQuoteParams configures Proxy.Quote.
 type ProxyQuoteParams struct {
 	Type ProxyType
@@ -98,7 +101,7 @@ type ProxyQuoteParams struct {
 	Quantity int
 }
 
-// ProxyPurchaseParams configures Proxy.Purchase.
+// ProxyPurchaseParams configures Proxy.Buy.
 type ProxyPurchaseParams struct {
 	Type ProxyType
 	// GB is the residential top-up size (metered types only).
@@ -111,30 +114,30 @@ type ProxyPurchaseParams struct {
 	IdempotencyKey string
 }
 
-// ProxyService wraps /api/account/proxies.
+// ProxyService wraps /api/v1/proxy.
 //
 // It covers the residential (metered, per-GB) and static (per-IP) proxy
-// surface: read the catalogue, quote, buy, list, extend, auto-renew, reset
+// surface: read pricing, quote, buy, list, show, extend, auto-renew, reset
 // sessions, usage analytics, and residential subscription control.
 type ProxyService struct {
 	client *Client
 }
 
-// Packages returns the residential GB package ladder (price, per-GB, discount).
-func (s *ProxyService) Packages(ctx context.Context) (map[string]any, error) {
-	return s.getMap(ctx, "/api/account/proxies/packages", nil)
+// Pricing returns all proxy prices — residential GB ladder + static per-IP
+// catalogue. Replaces the old `packages` / `catalog` verbs.
+func (s *ProxyService) Pricing(ctx context.Context) (map[string]any, error) {
+	return s.getMap(ctx, proxyBase+"/pricing", nil)
 }
 
 // Endpoints returns the white-label connection endpoints: regional entry
 // subdomains + the HTTP / SOCKS5 ports users can connect on.
 func (s *ProxyService) Endpoints(ctx context.Context) (map[string]any, error) {
-	return s.getMap(ctx, "/api/account/proxies/endpoints", nil)
+	return s.getMap(ctx, proxyBase+"/endpoints", nil)
 }
 
-// Catalog returns the static (per-IP) catalogue — products/plans/locations
-// with user prices.
-func (s *ProxyService) Catalog(ctx context.Context) (map[string]any, error) {
-	return s.getMap(ctx, "/api/account/proxies/catalog", nil)
+// Quotas returns the remaining prepaid proxy balances (per provider).
+func (s *ProxyService) Quotas(ctx context.Context) (map[string]any, error) {
+	return s.getMap(ctx, proxyBase+"/quotas", nil)
 }
 
 // Locations returns available targeting for a proxy type: residential geo
@@ -145,7 +148,7 @@ func (s *ProxyService) Locations(ctx context.Context, proxyType ProxyType) (map[
 	if proxyType != "" {
 		q.Set("type", string(proxyType))
 	}
-	return s.getMap(ctx, "/api/account/proxies/locations", q)
+	return s.getMap(ctx, proxyBase+"/locations", q)
 }
 
 // Quote estimates a purchase before buying (residential GB or a static
@@ -177,16 +180,16 @@ func (s *ProxyService) Quote(ctx context.Context, p *ProxyQuoteParams) (*ProxyQu
 		q.Set("quantity", strconv.Itoa(quantity))
 	}
 
-	raw, err := s.getMap(ctx, "/api/account/proxies/quote", q)
+	raw, err := s.getMap(ctx, proxyBase+"/quote", q)
 	if err != nil {
 		return nil, err
 	}
 	return &ProxyQuote{Raw: raw}, nil
 }
 
-// Purchase buys proxies (residential GB top-up or static IPs). Returns the
-// created order.
-func (s *ProxyService) Purchase(ctx context.Context, p *ProxyPurchaseParams) (*ProxyOrder, error) {
+// Buy buys proxies (residential GB top-up or static IPs) via
+// POST /api/v1/proxy/orders. Returns the created order.
+func (s *ProxyService) Buy(ctx context.Context, p *ProxyPurchaseParams) (*ProxyOrder, error) {
 	if p == nil {
 		return nil, &Error{Message: "params is required"}
 	}
@@ -223,7 +226,7 @@ func (s *ProxyService) Purchase(ctx context.Context, p *ProxyPurchaseParams) (*P
 	var raw json.RawMessage
 	if err := s.client.do(ctx, requestOptions{
 		method:  "POST",
-		path:    "/api/account/proxies/purchase",
+		path:    proxyOrdersPath,
 		body:    body,
 		headers: headers,
 	}, &raw); err != nil {
@@ -232,13 +235,13 @@ func (s *ProxyService) Purchase(ctx context.Context, p *ProxyPurchaseParams) (*P
 	return parseProxyOrder(raw)
 }
 
-// List returns the user's proxies: residential sub-user connection,
-// subscription, and per-IP orders.
+// List returns the user's proxy orders (residential connection, subscription,
+// and per-IP orders) via GET /api/v1/proxy/orders.
 func (s *ProxyService) List(ctx context.Context) (*ProxyList, error) {
 	var out ProxyList
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/proxies",
+		path:   proxyOrdersPath,
 	}, &out); err != nil {
 		return nil, err
 	}
@@ -248,8 +251,25 @@ func (s *ProxyService) List(ctx context.Context) (*ProxyList, error) {
 	return &out, nil
 }
 
+// Get returns a single proxy order by UUID via
+// GET /api/v1/proxy/orders/{uuid}.
+func (s *ProxyService) Get(ctx context.Context, orderUUID string) (*ProxyOrder, error) {
+	if orderUUID == "" {
+		return nil, &Error{Message: "orderUUID is required"}
+	}
+	var raw json.RawMessage
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   proxyOrdersPath + "/" + url.PathEscape(orderUUID),
+	}, &raw); err != nil {
+		return nil, err
+	}
+	return parseProxyOrder(unwrapData(raw))
+}
+
 // Extend renews a static (per-IP) order for another period (re-charges its
-// price). Days defaults to 30 when <= 0.
+// price) via POST /api/v1/proxy/orders/{uuid}/extend. Days defaults to 30
+// when <= 0.
 func (s *ProxyService) Extend(ctx context.Context, orderUUID string, days int) (*ProxyOrder, error) {
 	body := map[string]any{}
 	if days > 0 {
@@ -258,7 +278,7 @@ func (s *ProxyService) Extend(ctx context.Context, orderUUID string, days int) (
 	var raw json.RawMessage
 	if err := s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/proxies/" + url.PathEscape(orderUUID) + "/extend",
+		path:   proxyOrdersPath + "/" + url.PathEscape(orderUUID) + "/extend",
 		body:   body,
 	}, &raw); err != nil {
 		return nil, err
@@ -266,12 +286,13 @@ func (s *ProxyService) Extend(ctx context.Context, orderUUID string, days int) (
 	return parseProxyOrder(raw)
 }
 
-// AutoRenew toggles auto-renew (auto_extend) on a per-IP order.
+// AutoRenew toggles auto-renew (auto_extend) on a per-IP order via
+// POST /api/v1/proxy/orders/{uuid}/auto-renew.
 func (s *ProxyService) AutoRenew(ctx context.Context, orderUUID string, enabled bool) (*ProxyOrder, error) {
 	var raw json.RawMessage
 	if err := s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/proxies/" + url.PathEscape(orderUUID) + "/auto-renew",
+		path:   proxyOrdersPath + "/" + url.PathEscape(orderUUID) + "/auto-renew",
 		body:   map[string]any{"enabled": enabled},
 	}, &raw); err != nil {
 		return nil, err
@@ -284,7 +305,7 @@ func (s *ProxyService) AutoRenew(ctx context.Context, orderUUID string, enabled 
 func (s *ProxyService) ResetSessions(ctx context.Context) error {
 	return s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/proxies/sessions/reset",
+		path:   proxyBase + "/sessions/reset",
 	}, nil)
 }
 
@@ -295,7 +316,7 @@ func (s *ProxyService) Usage(ctx context.Context, from, to string) (map[string]a
 	q := url.Values{}
 	q.Set("from", from)
 	q.Set("to", to)
-	return s.getMap(ctx, "/api/account/proxies/usage", q)
+	return s.getMap(ctx, proxyBase+"/usage", q)
 }
 
 // SubscriptionCancel stops the residential subscription's auto-renewal
@@ -319,7 +340,7 @@ func (s *ProxyService) subscriptionAction(ctx context.Context, action string) (*
 	var sub ProxySubscription
 	if err := s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/proxies/subscription/" + action,
+		path:   proxyBase + "/subscription/" + action,
 	}, &sub); err != nil {
 		return nil, err
 	}
@@ -331,7 +352,7 @@ func (s *ProxyService) Trial(ctx context.Context) (map[string]any, error) {
 	var out map[string]any
 	if err := s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/proxies/trial",
+		path:   proxyBase + "/trial",
 	}, &out); err != nil {
 		return nil, err
 	}

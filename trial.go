@@ -9,7 +9,7 @@ type TrialStatus struct {
 	ExpiresAt string   `json:"expires_at,omitempty"`
 }
 
-// TrialService wraps /api/account/trial.
+// TrialService wraps /api/v1/trial.
 //
 // It lets callers inspect the active trial state and subscribe to one or more
 // trial-eligible services.
@@ -23,7 +23,7 @@ func (s *TrialService) Status(ctx context.Context) (*TrialStatus, error) {
 	var out TrialStatus
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/trial",
+		path:   "/api/v1/trial",
 	}, &out); err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func (s *TrialService) Subscribe(ctx context.Context, services []string) (map[st
 	var out map[string]any
 	if err := s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/trial/subscribe",
+		path:   "/api/v1/trial/subscribe",
 		body:   map[string]any{"services": services},
 	}, &out); err != nil {
 		return nil, err

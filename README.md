@@ -16,39 +16,73 @@ Requires Go 1.21+. No external dependencies.
 
 ```go
 client, _ := eveses.New(eveses.Config{APIKey: os.Getenv("EVESES_API_KEY")})
-order, _ := client.Activations.Create(ctx, &eveses.CreateActivationParams{Country: "ua", Service: "telegram"})
-sms, _   := client.Activations.Sms(ctx, order.OrderID)
+order, _ := client.Numbers.Create(ctx, &eveses.CreateNumberParams{Country: "ua", Service: "telegram"})
+sms, _   := client.Numbers.Sms(ctx, order.OrderID)
 bal, _   := client.Wallet.Balance(ctx)
-svcs, _  := client.Catalog.Services(ctx, &eveses.CatalogServicesParams{Mode: eveses.OrderModeActivation, Country: "ua"})
+prods, _ := client.Numbers.Products(ctx, &eveses.NumbersProductsParams{Mode: eveses.OrderModeActivation, Country: "ua"})
 ```
+
+> **v0.4.0 note:** all request paths moved to `/api/v1/*`. The old `Activations`
+> + `Catalog` modules are now the single `Numbers` module; `Proxy.Purchase` /
+> `WebUnblocker.Purchase` / `Emails.Purchase` are now `Buy`; and the
+> `Fingerprints` module has been removed. See the [changelog](#040).
 
 `EVESES_API_KEY` should be a Sanctum API token (kind=`api_key`) issued from your Eveses dashboard. Never commit it — read it from the environment, a secret manager, or your platform's config store.
 
-## Activations
+## Numbers
+
+The merged number-ordering (activations + rent) and catalog module — hits
+`/api/v1/numbers/*`.
 
 ```go
 import "context"
 
 ctx := context.Background()
-order, err := client.Activations.Create(ctx, &eveses.CreateActivationParams{
+order, err := client.Numbers.Create(ctx, &eveses.CreateNumberParams{
     Country:        "ua",
     Service:        "telegram",
     IdempotencyKey: "abc-123", // sent as Idempotency-Key header
 })
 
 // Poll for SMS
-bundle, _ := client.Activations.Sms(ctx, order.OrderID)
+bundle, _ := client.Numbers.Sms(ctx, order.OrderID)
 for _, m := range bundle.Stored { fmt.Println(m.Text) }
 for _, m := range bundle.Fresh  { fmt.Println(m.Text) }
 
-// Finish or cancel
-_, _ = client.Activations.Finish(ctx, order.OrderID)
-_, _ = client.Activations.Cancel(ctx, order.OrderID)
-
-// Re-fetch
-again, _ := client.Activations.Get(ctx, order.OrderID)
+// Order actions
+_, _ = client.Numbers.Finish(ctx, order.OrderID)
+_, _ = client.Numbers.Cancel(ctx, order.OrderID)
+_, _ = client.Numbers.Retry(ctx, order.OrderID)
+_, _ = client.Numbers.Repeat(ctx, order.OrderID)
+_, _ = client.Numbers.AutoRenew(ctx, order.OrderID, true) // rent orders
+again, _ := client.Numbers.Get(ctx, order.OrderID)
 _ = again
+
+// Buy several at once
+orders, _ := client.Numbers.CreateBatch(ctx, []*eveses.CreateNumberParams{
+    {Country: "ua", Service: "telegram"},
+    {Country: "pl", Service: "wa"},
+})
+_ = orders
+
+// Catalog reads
+countries, _ := client.Numbers.Countries(ctx, &eveses.NumbersCountriesParams{Mode: eveses.OrderModeActivation})
+products,  _ := client.Numbers.Products(ctx,  &eveses.NumbersProductsParams{Mode: eveses.OrderModeActivation, Country: "ua"})
+carriers,  _ := client.Numbers.Carriers(ctx, "ua", eveses.OrderModeActivation)
+states,    _ := client.Numbers.States(ctx, "us", eveses.OrderModeActivation)
+_, _, _, _ = countries, products, carriers, states
+
+dur := 60
+pricing, _ := client.Numbers.Pricing(ctx, &eveses.NumbersPricingParams{
+    Country:         "ua",
+    Service:         "telegram",
+    Mode:            eveses.OrderModeRent,
+    DurationMinutes: &dur,
+})
+_ = pricing
 ```
+
+The `Service` field on `NumbersPricingParams` is the friendlier name for the wire param `product`; the SDK translates it for you. Same for `DurationMinutes` → `duration`.
 
 ## Wallet
 
@@ -57,49 +91,36 @@ bal, err := client.Wallet.Balance(ctx)
 fmt.Println(bal.AvailableBalance, bal.Currency) // e.g. 4800 USD (cents)
 ```
 
-## Catalog
-
-```go
-countries, _ := client.Catalog.Countries(ctx, &eveses.CatalogCountriesParams{Mode: eveses.OrderModeActivation})
-services,  _ := client.Catalog.Services(ctx,  &eveses.CatalogServicesParams{Mode: eveses.OrderModeActivation, Country: "ua"})
-
-dur := 60
-pricing, _ := client.Catalog.Pricing(ctx, &eveses.CatalogPricingParams{
-    Country:         "ua",
-    Service:         "telegram",
-    Mode:            eveses.OrderModeRent,
-    DurationMinutes: &dur,
-})
-```
-
-The `Service` field on `CatalogPricingParams` is the friendlier name for the wire param `product`; the SDK translates it for you. Same for `DurationMinutes` → `duration`.
-
 ## Proxy
 
 Residential (metered, per-GB) and static (per-IP: ISP, datacenter, IPv6, sneaker, mobile) proxies. Read the catalogue, quote, buy, list, extend, auto-renew, reset sessions, view usage, and manage the residential subscription.
 
-```go
-// Catalogue / connection info
-pkgs, _   := client.Proxy.Packages(ctx)                                 // residential GB ladder
-eps, _    := client.Proxy.Endpoints(ctx)                                // white-label entry subdomains + ports
-cat, _    := client.Proxy.Catalog(ctx)                                  // static (per-IP) products/plans
-locs, _   := client.Proxy.Locations(ctx, eveses.ProxyTypeResidential)   // targeting
+All paths hit `/api/v1/proxy/*` (singular). Orders live under `/orders`.
 
-// Quote + purchase residential GB
+```go
+// Pricing / connection info
+prices, _ := client.Proxy.Pricing(ctx)                                  // residential GB ladder + static catalogue
+eps, _    := client.Proxy.Endpoints(ctx)                                // white-label entry subdomains + ports
+locs, _   := client.Proxy.Locations(ctx, eveses.ProxyTypeResidential)   // targeting
+quotas, _ := client.Proxy.Quotas(ctx)                                   // remaining prepaid GB
+
+// Quote + buy residential GB
 q, _ := client.Proxy.Quote(ctx, &eveses.ProxyQuoteParams{Type: eveses.ProxyTypeResidential, GB: 5})
-order, _ := client.Proxy.Purchase(ctx, &eveses.ProxyPurchaseParams{
+order, _ := client.Proxy.Buy(ctx, &eveses.ProxyPurchaseParams{
     Type: eveses.ProxyTypeResidential, GB: 5, IdempotencyKey: "abc-123",
 })
 
 // Or buy static IPs via a product/plan/location selection
-_, _ = client.Proxy.Purchase(ctx, &eveses.ProxyPurchaseParams{
+_, _ = client.Proxy.Buy(ctx, &eveses.ProxyPurchaseParams{
     Type:      eveses.ProxyTypeISP,
     Selection: &eveses.ProxyStaticSelection{ProductID: 1, PlanID: 2, LocationID: 3, Quantity: 2},
 })
 
-list, _ := client.Proxy.List(ctx)                      // residential sub-user + subscription + per-IP orders
-_, _ = client.Proxy.Extend(ctx, order.UUID, 30)        // renew a per-IP order
-_, _ = client.Proxy.AutoRenew(ctx, order.UUID, true)   // toggle auto-extend
+list, _ := client.Proxy.List(ctx)                      // GET /orders — residential + subscription + per-IP orders
+one, _  := client.Proxy.Get(ctx, order.UUID)           // GET /orders/{uuid}
+_ = one
+_, _ = client.Proxy.Extend(ctx, order.UUID, 30)        // POST /orders/{uuid}/extend
+_, _ = client.Proxy.AutoRenew(ctx, order.UUID, true)   // POST /orders/{uuid}/auto-renew
 _ = client.Proxy.ResetSessions(ctx)                    // rotate residential sticky sessions
 usage, _ := client.Proxy.Usage(ctx, "2026-06-01", "2026-06-30")
 _, _ = client.Proxy.Trial(ctx)                         // one-time free trial
@@ -112,12 +133,16 @@ _, _ = client.Proxy.SubscriptionResume(ctx)
 
 ## WebUnblocker
 
-Request-metered Web Unblocker access. Packages, quoting, purchasing, trial, access/quota checks, and subscription lifecycle.
+Request-metered Web Unblocker access — hits `/api/v1/webunblocker/*` (no
+hyphen). Pricing, quoting, buying, listing, trial, access/quota checks, and
+subscription lifecycle.
 
 ```go
-pkgs, _ := client.WebUnblocker.Packages(ctx)
+prices, _ := client.WebUnblocker.Pricing(ctx)
 q, _    := client.WebUnblocker.Quote(ctx, 10000, false)              // requests, subscription
-order, _ := client.WebUnblocker.Purchase(ctx, 10000, false, "abc-123") // requests, subscription, idempotencyKey
+order, _ := client.WebUnblocker.Buy(ctx, 10000, false, "abc-123")    // requests, subscription, idempotencyKey — POST /orders
+orders, _ := client.WebUnblocker.List(ctx)                           // GET /orders
+_, _ = orders, prices
 _, _ = client.WebUnblocker.Trial(ctx)                                // one-time free trial
 
 access, _ := client.WebUnblocker.Access(ctx)                         // credentials + quota + orders
@@ -130,20 +155,22 @@ _, _ = client.WebUnblocker.SubscriptionResume(ctx)
 
 ## Emails
 
-Rent disposable email mailboxes and read their inbound messages.
+Rent disposable email mailboxes and read their inbound messages — hits
+`/api/v1/emails/*`. Inbox routes are keyed on the email address.
 
 ```go
-domains, _ := client.Emails.Domains(ctx, "")                          // optional site filter
+prices, _  := client.Emails.Pricing(ctx, "")                          // optional site filter; domains under the `domains` key
 q, _       := client.Emails.Quote(ctx, "example.com", "site", "provider")
-order, _   := client.Emails.Purchase(ctx, "example.com", "site", "provider", "abc-123")
+order, _   := client.Emails.Buy(ctx, "example.com", "site", "provider", "abc-123") // POST /orders
+_ = prices
 
-orders, _  := client.Emails.List(ctx, false)                          // includeReleased
-mailbox, _ := client.Emails.Get(ctx, order.UUID)
-msgs, _    := client.Emails.Messages(ctx, order.UUID, 1, 20)          // uuid, page, perPage
+orders, _  := client.Emails.List(ctx, false)                          // GET /orders — includeReleased
+mailbox, _ := client.Emails.Get(ctx, order.Email)                     // GET /{email}
+msgs, _    := client.Emails.Messages(ctx, order.Email, 1, 20)         // email, page, perPage
 for _, m := range msgs { fmt.Println(m.From, m.Subject) }
 
-_ = client.Emails.MarkRead(ctx, order.UUID, msgs[0].ID)
-_ = client.Emails.Release(ctx, order.UUID)                            // delete the mailbox
+_ = client.Emails.MarkRead(ctx, order.Email, msgs[0].ID)
+_ = client.Emails.Release(ctx, order.Email)                           // delete the mailbox
 ```
 
 ## Captcha
@@ -157,18 +184,65 @@ sol, err := client.Captcha.Solve(ctx, "recaptcha_v2", map[string]any{
 }, &eveses.CaptchaSolveParams{TimeoutSec: 180})
 if err != nil { log.Fatal(err) }
 fmt.Println(sol.Solution)
+
+// Per-solve price list and task history
+rates, _ := client.Captcha.Rates(ctx)                       // GET /api/v1/captcha/rates
+usage, _ := client.Captcha.Usage(ctx, &eveses.CaptchaUsageParams{Limit: 50})
+_ = rates
+for _, t := range usage.Data { fmt.Println(t.ID, t.Type, t.Status, t.CostMicroUSD) }
 ```
 
-## Fingerprints
+## Orders (global)
 
-Pay-per-use browser-fingerprint generation (count-on-success). Synchronous — one request returns a complete fingerprint.
+The unified cross-product order feed — `/api/v1/orders`. Captcha is not here
+(see `Captcha.Usage`).
 
 ```go
-fp, _ := client.Fingerprints.Generate(ctx, map[string]any{
-    "format": "chrome", "country": "us",
+page, _ := client.Orders.List(ctx, &eveses.OrdersListParams{
+    Service: []string{"proxy", "numbers"}, Limit: 20,
 })
-rnd, _ := client.Fingerprints.Random(ctx, nil)
-fmt.Println(fp.Payload, fp.PriceMicroUSD)
+for _, o := range page.Data {
+    fmt.Println(o.Source, o.ID, o.Status, o.AmountCents, o.Title)
+}
+if page.Meta.HasMore { /* fetch next with Cursor: page.Meta.NextCursor */ }
+
+one, _ := client.Orders.Get(ctx, "b1f2-…-uuid")            // OrderView for any product
+_ = one
+```
+
+## Pricing (aggregate)
+
+Every product's prices in one call — `/api/v1/pricing`.
+
+```go
+p, _ := client.Pricing.All(ctx)
+fmt.Println(p.Currency, p.Numbers, p.Proxy, p.WebUnblocker, p.Emails, p.Captcha)
+```
+
+## Quotas
+
+Remaining prepaid balances — `/api/v1/quotas`. Only products with a
+decrementing counter appear.
+
+```go
+q, _ := client.Quotas.Get(ctx)
+for _, t := range q.Trial        { fmt.Println("trial", t.Service, t.Remaining) }
+for _, t := range q.Proxy        { fmt.Println("proxy", t.Provider, t.Remaining) }
+for _, t := range q.WebUnblocker { fmt.Println("wu", t.Provider, t.Remaining) }
+```
+
+## Me
+
+The authenticated identity plus the token's abilities and product features —
+`/api/v1/me`.
+
+```go
+me, _ := client.Me.Get(ctx)
+fmt.Println(me.Email, me.Abilities)          // e.g. ["*"]
+if me.Features["proxy"] { /* show the proxy product entry point */ }
+
+loyalty, _ := client.Me.Loyalty(ctx)         // GET /api/v1/me/loyalty
+_ = loyalty
 ```
 
 ## Trial
@@ -258,11 +332,25 @@ client, _ := eveses.New(eveses.Config{
 
 - **Auto-retry**: on `429`, the SDK sleeps up to `Retry-After` seconds (capped at 60s, default 1s) and retries once. Subsequent 429s surface as `*RateLimitError`.
 - **Bearer auth**: every request carries `Authorization: Bearer <APIKey>`.
-- **Idempotency**: when `IdempotencyKey` is set on `CreateActivationParams`, it is sent both in the JSON body and as the `Idempotency-Key` HTTP header.
+- **Idempotency**: when `IdempotencyKey` is set on `CreateNumberParams` (and the proxy/webunblocker/emails buy helpers), it is sent both in the JSON body and as the `Idempotency-Key` HTTP header.
 - **Envelope unwrap**: responses of the form `{"data": {...}}` are auto-unwrapped; raw `{...}` objects are accepted too.
 - **Concurrent use**: `*Client` is safe to share across goroutines.
 
 ## Changelog
+
+### 0.4.0
+
+- **Moved every request path to `/api/v1/*`** (was `/api/account/*` / a v1 mix). The base URL is unchanged.
+- **`Numbers`** (`client.Numbers`) — the old `Activations` + `Catalog` modules merged into one, hitting `/api/v1/numbers/*`: orders (`Create`, `Get`, `Sms`, `Cancel`, `Finish`, `Retry`, `Repeat`, `AutoRenew`, `CreateBatch`) and catalog reads (`Pricing`, `Countries`, `Products`, `Carriers`, `States`).
+- **`WebUnblocker`** renamed on the wire to `/api/v1/webunblocker/*` (no hyphen); `Purchase` → `Buy` (`POST /orders`), added `List` (`GET /orders`), `Packages` → `Pricing`.
+- **`Proxy`** repointed to `/api/v1/proxy/*` (singular); `Purchase` → `Buy` (`POST /orders`), `List`/`Get` under `/orders`, extend/auto-renew under `/orders/{uuid}`, `Packages`/`Catalog` → `Pricing`, added `Quotas`.
+- **`Emails`** repointed to `/api/v1/emails/*`; `Purchase` → `Buy` (`POST /orders`), `List` (`GET /orders`), `Domains` → `Pricing` (domains under the `domains` key); inbox routes keyed on the email address.
+- **`Captcha`** — kept `Solve`/`Rates`; added `Usage` (`GET /api/v1/captcha/usage`).
+- **NEW `Orders`** (`client.Orders`) — unified cross-product order feed (`GET /api/v1/orders` + `/{uuid}`), returning the normalized `OrderView`.
+- **NEW `Pricing`** (`client.Pricing`) — aggregate price list (`GET /api/v1/pricing`).
+- **NEW `Quotas`** (`client.Quotas`) — remaining prepaid balances (`GET /api/v1/quotas`).
+- **NEW `Me`** (`client.Me`) — `GET /api/v1/me` now carries `Abilities` + `Features`; also `Loyalty`.
+- **REMOVED `Fingerprints`** — the whole product is gone (module, tests, examples, wiring).
 
 ### 0.3.0
 

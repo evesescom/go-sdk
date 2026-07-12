@@ -29,7 +29,7 @@ func TestProxyPurchase_Residential(t *testing.T) {
 		}`))
 	})
 
-	order, err := client.Proxy.Purchase(context.Background(), &ProxyPurchaseParams{
+	order, err := client.Proxy.Buy(context.Background(), &ProxyPurchaseParams{
 		Type:           ProxyTypeResidential,
 		GB:             10,
 		Subscription:   true,
@@ -38,7 +38,7 @@ func TestProxyPurchase_Residential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Purchase error: %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/api/account/proxies/purchase" {
+	if gotMethod != http.MethodPost || gotPath != "/api/v1/proxy/orders" {
 		t.Errorf("request = %s %s", gotMethod, gotPath)
 	}
 	if gotIdempotency != "idem-px" {
@@ -68,7 +68,7 @@ func TestProxyPurchase_StaticSendsSelection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"uuid":"px_isp","type":"isp","status":"active","price_cents":300}`))
 	})
 
-	order, err := client.Proxy.Purchase(context.Background(), &ProxyPurchaseParams{
+	order, err := client.Proxy.Buy(context.Background(), &ProxyPurchaseParams{
 		Type: ProxyTypeISP,
 		Selection: &ProxyStaticSelection{
 			ProductID: 9, PlanID: 4, LocationID: 51, LocationName: "Australia", Quantity: 3,
@@ -104,7 +104,7 @@ func TestProxyQuote_ResidentialQueryParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Quote error: %v", err)
 	}
-	if gotPath != "/api/account/proxies/quote" {
+	if gotPath != "/api/v1/proxy/quote" {
 		t.Errorf("path = %q", gotPath)
 	}
 	if gotType != "residential" || gotGB != "10" || gotSub != "true" {
@@ -131,7 +131,7 @@ func TestProxyList_ParsesResidentialAndOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List error: %v", err)
 	}
-	if gotPath != "/api/account/proxies" {
+	if gotPath != "/api/v1/proxy/orders" {
 		t.Errorf("path = %q", gotPath)
 	}
 	if list.Residential == nil || list.Residential.Username != "u" || list.Residential.TrafficGBAvailable != 5 {
@@ -165,7 +165,7 @@ func TestProxyExtendAndAutoRenew(t *testing.T) {
 	if _, err := client.Proxy.Extend(context.Background(), "px_1", 30); err != nil {
 		t.Fatalf("Extend error: %v", err)
 	}
-	if extendPath != "/api/account/proxies/px_1/extend" || extendBody["days"] != float64(30) {
+	if extendPath != "/api/v1/proxy/orders/px_1/extend" || extendBody["days"] != float64(30) {
 		t.Errorf("extend path=%q body=%#v", extendPath, extendBody)
 	}
 
@@ -173,7 +173,7 @@ func TestProxyExtendAndAutoRenew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AutoRenew error: %v", err)
 	}
-	if autoPath != "/api/account/proxies/px_1/auto-renew" || autoBody["enabled"] != true {
+	if autoPath != "/api/v1/proxy/orders/px_1/auto-renew" || autoBody["enabled"] != true {
 		t.Errorf("auto-renew path=%q body=%#v", autoPath, autoBody)
 	}
 	if !order.AutoExtend {
@@ -200,7 +200,7 @@ func TestProxyResetSessionsAndSubscription(t *testing.T) {
 	if err := client.Proxy.ResetSessions(context.Background()); err != nil {
 		t.Fatalf("ResetSessions error: %v", err)
 	}
-	if resetPath != "/api/account/proxies/sessions/reset" {
+	if resetPath != "/api/v1/proxy/sessions/reset" {
 		t.Errorf("reset path = %q", resetPath)
 	}
 
@@ -208,7 +208,7 @@ func TestProxyResetSessionsAndSubscription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubscriptionPause error: %v", err)
 	}
-	if subPath != "/api/account/proxies/subscription/pause" || sub.Status != "paused" {
+	if subPath != "/api/v1/proxy/subscription/pause" || sub.Status != "paused" {
 		t.Errorf("subscription path=%q status=%q", subPath, sub.Status)
 	}
 }

@@ -46,10 +46,10 @@ func TestCaptchaSolve_PollsUntilReady(t *testing.T) {
 	if res.TaskID != 7 || res.Status != "ready" || res.Solution != "TOK" || res.PriceMicroUSD != 3392 {
 		t.Errorf("unexpected result: %#v", res)
 	}
-	if gotMethod != http.MethodPost || gotSolvePath != "/api/account/captcha/solve" {
+	if gotMethod != http.MethodPost || gotSolvePath != "/api/v1/captcha/solve" {
 		t.Errorf("solve request = %s %s", gotMethod, gotSolvePath)
 	}
-	if gotResultPath != "/api/account/captcha/result/7" {
+	if gotResultPath != "/api/v1/captcha/result/7" {
 		t.Errorf("result path = %s", gotResultPath)
 	}
 	if gotBody["type"] != "RecaptchaV2TaskProxyless" {

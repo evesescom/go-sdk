@@ -69,7 +69,7 @@ func main() {
 
 	// Services() is the global product catalog for the mode; Country is
 	// informational on the v1 endpoint today.
-	services, err := client.Catalog.Services(ctx, &eveses.CatalogServicesParams{
+	services, err := client.Numbers.Products(ctx, &eveses.NumbersProductsParams{
 		Mode:    eveses.OrderModeActivation,
 		Country: country,
 	})
@@ -77,8 +77,8 @@ func main() {
 		handle(err)
 		return
 	}
-	fmt.Printf("%d services available (mode=%s)\n", len(services.Services), services.Mode)
-	if !contains(services.Services, service) {
+	fmt.Printf("%d products available (mode=%s)\n", len(services.Products), services.Mode)
+	if !contains(services.Products, service) {
 		fmt.Fprintf(os.Stderr, "Warning: '%s' not in catalog — request may 404.\n", service)
 	}
 
@@ -89,7 +89,7 @@ func main() {
 		log.Fatalf("rand: %v", err)
 	}
 
-	order, err := client.Activations.Create(ctx, &eveses.CreateActivationParams{
+	order, err := client.Numbers.Create(ctx, &eveses.CreateNumberParams{
 		Country:        country,
 		Service:        service,
 		Mode:           eveses.OrderModeActivation,
@@ -100,7 +100,7 @@ func main() {
 		return
 	}
 	fmt.Printf("Created order %s: phone=%s status=%s\n", order.OrderID, order.Phone, order.Status)
-	fmt.Println("Next: poll client.Activations.Sms(ctx, order.OrderID) for the code.")
+	fmt.Println("Next: poll client.Numbers.Sms(ctx, order.OrderID) for the code.")
 }
 
 // handle prints SDK errors in an idiomatic Go style using errors.As to

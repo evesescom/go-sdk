@@ -5,7 +5,7 @@
 //	client, err := eveses.New(eveses.Config{APIKey: os.Getenv("EVESES_API_KEY")})
 //	if err != nil { log.Fatal(err) }
 //
-//	order, err := client.Activations.Create(ctx, &eveses.CreateActivationParams{
+//	order, err := client.Numbers.Create(ctx, &eveses.CreateNumberParams{
 //	    Country: "ua", Service: "telegram",
 //	})
 //	bal, err := client.Wallet.Balance(ctx)
@@ -34,9 +34,9 @@ const (
 	// DefaultTimeout matches the JS / Python / PHP SDKs.
 	DefaultTimeout = 30 * time.Second
 	// DefaultUserAgent identifies SDK + version on every request.
-	DefaultUserAgent = "eveses-go/0.3.0"
+	DefaultUserAgent = "eveses-go/0.4.0"
 	// Version is the SDK semver.
-	Version = "0.3.0"
+	Version = "0.4.0"
 )
 
 // Config configures a Client. Only APIKey is required; the rest fall back
@@ -71,15 +71,17 @@ type Client struct {
 	userAgent      string
 	defaultHeaders map[string]string
 
-	Activations  *ActivationsService
+	Numbers      *NumbersService
 	Wallet       *WalletService
-	Catalog      *CatalogService
 	Captcha      *CaptchaService
-	Fingerprints *FingerprintsService
 	Proxy        *ProxyService
 	WebUnblocker *WebUnblockerService
 	Emails       *EmailsService
 	Trial        *TrialService
+	Orders       *OrdersService
+	Pricing      *PricingService
+	Quotas       *QuotasService
+	Me           *MeService
 }
 
 // New constructs a Client from Config. Returns an error iff APIKey is empty.
@@ -115,15 +117,17 @@ func New(cfg Config) (*Client, error) {
 		userAgent:      ua,
 		defaultHeaders: copyHeaders(cfg.DefaultHeaders),
 	}
-	c.Activations = &ActivationsService{client: c}
+	c.Numbers = &NumbersService{client: c}
 	c.Wallet = &WalletService{client: c}
-	c.Catalog = &CatalogService{client: c}
 	c.Captcha = &CaptchaService{client: c}
-	c.Fingerprints = &FingerprintsService{client: c}
 	c.Proxy = &ProxyService{client: c}
 	c.WebUnblocker = &WebUnblockerService{client: c}
 	c.Emails = &EmailsService{client: c}
 	c.Trial = &TrialService{client: c}
+	c.Orders = &OrdersService{client: c}
+	c.Pricing = &PricingService{client: c}
+	c.Quotas = &QuotasService{client: c}
+	c.Me = &MeService{client: c}
 	return c, nil
 }
 
@@ -366,6 +370,32 @@ func unwrapData(raw json.RawMessage) json.RawMessage {
 	}
 	if data, ok := probe["data"]; ok && len(data) > 0 && data[0] == '{' {
 		return data
+	}
+	return raw
+}
+
+// unwrapArray returns the array payload from a {"data": [...]} or
+// {"orders": [...]} envelope, else raw itself (which may already be a naked
+// array). Non-array payloads are returned unchanged.
+func unwrapArray(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return trimmed
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return raw
+	}
+	for _, key := range []string{"data", "orders"} {
+		if v, ok := probe[key]; ok {
+			vt := bytes.TrimSpace(v)
+			if len(vt) > 0 && vt[0] == '[' {
+				return vt
+			}
+		}
 	}
 	return raw
 }

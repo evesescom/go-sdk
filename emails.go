@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// EmailDomain is a single email domain entry returned by Emails.Domains.
+// EmailDomain is a single email domain entry returned by Emails.Pricing.
 type EmailDomain struct {
 	Domain   string `json:"domain"`
 	Site     string `json:"site,omitempty"`
@@ -34,8 +34,7 @@ type EmailMessage struct {
 	Read       bool   `json:"read"`
 }
 
-// EmailOrder is a rented email mailbox returned by Emails.Purchase / Get /
-// List.
+// EmailOrder is a rented email mailbox returned by Emails.Buy / Get / List.
 type EmailOrder struct {
 	UUID      string `json:"uuid"`
 	Email     string `json:"email,omitempty"`
@@ -50,23 +49,26 @@ type EmailOrder struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-// EmailsService wraps /api/account/emails.
+const emailsBase = "/api/v1/emails"
+
+// EmailsService wraps /api/v1/emails.
 //
-// It covers domain discovery, quoting, purchasing, listing, reading
+// It covers pricing/domain discovery, quoting, purchasing, listing, reading
 // individual mailboxes and their messages, marking messages read, and
 // releasing (deleting) a mailbox.
 type EmailsService struct {
 	client *Client
 }
 
-// Domains returns available email domains, optionally filtered by site.
-// site is optional; it is omitted from the query when empty.
-func (s *EmailsService) Domains(ctx context.Context, site string) (map[string]any, error) {
+// Pricing returns available email domains and prices (domains under the
+// `domains` key). Replaces the old `domains` verb. site is optional; it is
+// omitted from the query when empty.
+func (s *EmailsService) Pricing(ctx context.Context, site string) (map[string]any, error) {
 	q := url.Values{}
 	if site != "" {
 		q.Set("site", site)
 	}
-	return s.getMap(ctx, "/api/account/emails/domains", q)
+	return s.getMap(ctx, emailsBase+"/pricing", q)
 }
 
 // Quote estimates the cost of renting an email address before committing.
@@ -76,7 +78,7 @@ func (s *EmailsService) Quote(ctx context.Context, domain, site, provider string
 	q.Set("site", site)
 	q.Set("provider", provider)
 
-	raw, err := s.getMap(ctx, "/api/account/emails/quote", q)
+	raw, err := s.getMap(ctx, emailsBase+"/quote", q)
 	if err != nil {
 		return nil, err
 	}
@@ -109,9 +111,10 @@ func (s *EmailsService) Quote(ctx context.Context, domain, site, provider string
 	return quote, nil
 }
 
-// Purchase rents an email address. idempotencyKey, when non-empty, is
-// forwarded as an Idempotency-Key header so replays return the same order.
-func (s *EmailsService) Purchase(ctx context.Context, domain, site, provider, idempotencyKey string) (*EmailOrder, error) {
+// Buy rents an email address via POST /api/v1/emails/orders. idempotencyKey,
+// when non-empty, is forwarded as an Idempotency-Key header so replays return
+// the same order.
+func (s *EmailsService) Buy(ctx context.Context, domain, site, provider, idempotencyKey string) (*EmailOrder, error) {
 	body := map[string]any{
 		"domain":   domain,
 		"site":     site,
@@ -126,7 +129,7 @@ func (s *EmailsService) Purchase(ctx context.Context, domain, site, provider, id
 	var order EmailOrder
 	if err := s.client.do(ctx, requestOptions{
 		method:  "POST",
-		path:    "/api/account/emails/purchase",
+		path:    emailsBase + "/orders",
 		body:    body,
 		headers: headers,
 	}, &order); err != nil {
@@ -138,8 +141,8 @@ func (s *EmailsService) Purchase(ctx context.Context, domain, site, provider, id
 	return &order, nil
 }
 
-// List returns the user's rented email orders. Set includeReleased to true
-// to also return released (expired) mailboxes.
+// List returns the user's rented email orders via GET /api/v1/emails/orders.
+// Set includeReleased to true to also return released (expired) mailboxes.
 func (s *EmailsService) List(ctx context.Context, includeReleased bool) ([]EmailOrder, error) {
 	q := url.Values{}
 	if includeReleased {
@@ -149,7 +152,7 @@ func (s *EmailsService) List(ctx context.Context, includeReleased bool) ([]Email
 	var out []EmailOrder
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/emails",
+		path:   emailsBase + "/orders",
 		query:  q,
 	}, &out); err != nil {
 		return nil, err
@@ -160,12 +163,13 @@ func (s *EmailsService) List(ctx context.Context, includeReleased bool) ([]Email
 	return out, nil
 }
 
-// Get returns a single rented email mailbox by UUID.
-func (s *EmailsService) Get(ctx context.Context, uuid string) (*EmailOrder, error) {
+// Get returns a single rented email mailbox, keyed on its email address
+// via GET /api/v1/emails/{email}.
+func (s *EmailsService) Get(ctx context.Context, email string) (*EmailOrder, error) {
 	var order EmailOrder
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/emails/" + url.PathEscape(uuid),
+		path:   emailsBase + "/" + url.PathEscape(email),
 	}, &order); err != nil {
 		return nil, err
 	}
@@ -175,9 +179,10 @@ func (s *EmailsService) Get(ctx context.Context, uuid string) (*EmailOrder, erro
 	return &order, nil
 }
 
-// Messages returns the paginated inbox for a rented email mailbox. page and
-// perPage are optional (pass 0 to use API defaults).
-func (s *EmailsService) Messages(ctx context.Context, uuid string, page, perPage int) ([]EmailMessage, error) {
+// Messages returns the paginated inbox for a rented email mailbox, keyed on
+// its email address via GET /api/v1/emails/{email}/messages. page and perPage
+// are optional (pass 0 to use API defaults).
+func (s *EmailsService) Messages(ctx context.Context, email string, page, perPage int) ([]EmailMessage, error) {
 	q := url.Values{}
 	if page > 0 {
 		q.Set("page", strconv.Itoa(page))
@@ -189,7 +194,7 @@ func (s *EmailsService) Messages(ctx context.Context, uuid string, page, perPage
 	var out []EmailMessage
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/emails/" + url.PathEscape(uuid) + "/messages",
+		path:   emailsBase + "/" + url.PathEscape(email) + "/messages",
 		query:  q,
 	}, &out); err != nil {
 		return nil, err
@@ -201,19 +206,19 @@ func (s *EmailsService) Messages(ctx context.Context, uuid string, page, perPage
 }
 
 // MarkRead marks a specific message as read on a rented email mailbox.
-func (s *EmailsService) MarkRead(ctx context.Context, uuid, messageID string) error {
+func (s *EmailsService) MarkRead(ctx context.Context, email, messageID string) error {
 	return s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/emails/" + url.PathEscape(uuid) + "/messages/" + url.PathEscape(messageID) + "/read",
+		path:   emailsBase + "/" + url.PathEscape(email) + "/messages/" + url.PathEscape(messageID) + "/read",
 	}, nil)
 }
 
 // Release deletes / releases a rented email mailbox. The mailbox is
 // deactivated and can no longer receive messages.
-func (s *EmailsService) Release(ctx context.Context, uuid string) error {
+func (s *EmailsService) Release(ctx context.Context, email string) error {
 	return s.client.do(ctx, requestOptions{
 		method: "DELETE",
-		path:   "/api/account/emails/" + url.PathEscape(uuid),
+		path:   emailsBase + "/" + url.PathEscape(email),
 	}, nil)
 }
 

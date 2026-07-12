@@ -6,7 +6,7 @@ import (
 )
 
 // WalletBalance is the snapshot of total / held / available balance and
-// currency returned by /api/account/wallet.
+// currency returned by /api/v1/wallet.
 type WalletBalance struct {
 	Balance          int    `json:"balance"`
 	HeldBalance      int    `json:"held_balance"`
@@ -14,7 +14,7 @@ type WalletBalance struct {
 	Currency         string `json:"currency"`
 }
 
-// WalletService wraps /api/account/wallet.
+// WalletService wraps /api/v1/wallet.
 type WalletService struct {
 	client *Client
 }
@@ -25,7 +25,7 @@ func (s *WalletService) Balance(ctx context.Context) (*WalletBalance, error) {
 	var raw json.RawMessage
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/wallet",
+		path:   "/api/v1/wallet",
 	}, &raw); err != nil {
 		return nil, err
 	}

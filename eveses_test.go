@@ -63,7 +63,7 @@ func TestActivationsCreate_HappyPath(t *testing.T) {
 	})
 
 	maxPrice := 2000
-	order, err := client.Activations.Create(context.Background(), &CreateActivationParams{
+	order, err := client.Numbers.Create(context.Background(), &CreateNumberParams{
 		Country:        "ua",
 		Service:        "telegram",
 		IdempotencyKey: "idem_test_1",
@@ -76,8 +76,8 @@ func TestActivationsCreate_HappyPath(t *testing.T) {
 	if gotMethod != http.MethodPost {
 		t.Errorf("method = %q, want POST", gotMethod)
 	}
-	if gotPath != "/api/account/orders" {
-		t.Errorf("path = %q, want /api/account/orders", gotPath)
+	if gotPath != "/api/v1/numbers/orders" {
+		t.Errorf("path = %q, want /api/v1/numbers/orders", gotPath)
 	}
 	if gotAuth != "Bearer sk_test_12345" {
 		t.Errorf("Authorization = %q, want Bearer sk_test_12345", gotAuth)
@@ -190,7 +190,7 @@ func TestRateLimit_ExhaustedReturnsRateLimitError(t *testing.T) {
 	}
 }
 
-func TestCatalogServices_PassesModeAndQueriesProductsEndpoint(t *testing.T) {
+func TestNumbersProducts_PassesModeAndQueriesProductsEndpoint(t *testing.T) {
 	var gotPath, gotMode string
 
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -205,12 +205,12 @@ func TestCatalogServices_PassesModeAndQueriesProductsEndpoint(t *testing.T) {
 		}`))
 	})
 
-	resp, err := client.Catalog.Services(context.Background(), &CatalogServicesParams{
+	resp, err := client.Numbers.Products(context.Background(), &NumbersProductsParams{
 		Mode:    OrderModeActivation,
 		Country: "UA",
 	})
 	if err != nil {
-		t.Fatalf("Services returned error: %v", err)
+		t.Fatalf("Products returned error: %v", err)
 	}
 	if gotPath != "/api/v1/numbers/products" {
 		t.Errorf("path = %q, want /api/v1/numbers/products", gotPath)
@@ -218,15 +218,15 @@ func TestCatalogServices_PassesModeAndQueriesProductsEndpoint(t *testing.T) {
 	if gotMode != "activation" {
 		t.Errorf("mode query = %q, want activation", gotMode)
 	}
-	if len(resp.Services) != 3 || resp.Services[0] != "telegram" {
-		t.Errorf("services = %v", resp.Services)
+	if len(resp.Products) != 3 || resp.Products[0] != "telegram" {
+		t.Errorf("products = %v", resp.Products)
 	}
 	if resp.Country != "ua" {
 		t.Errorf("country echo = %q, want ua (lowercased)", resp.Country)
 	}
 }
 
-func TestCatalogPricing_TranslatesServiceAndDuration(t *testing.T) {
+func TestNumbersPricing_TranslatesServiceAndDuration(t *testing.T) {
 	var gotProduct, gotDuration, gotCountry string
 
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +250,7 @@ func TestCatalogPricing_TranslatesServiceAndDuration(t *testing.T) {
 	})
 
 	dur := 60
-	resp, err := client.Catalog.Pricing(context.Background(), &CatalogPricingParams{
+	resp, err := client.Numbers.Pricing(context.Background(), &NumbersPricingParams{
 		Country:         "UA",
 		Service:         "telegram",
 		Mode:            OrderModeRent,

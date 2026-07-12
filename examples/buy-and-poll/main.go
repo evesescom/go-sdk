@@ -70,7 +70,7 @@ func main() {
 		log.Fatalf("rand: %v", err)
 	}
 
-	order, err := client.Activations.Create(ctx, &eveses.CreateActivationParams{
+	order, err := client.Numbers.Create(ctx, &eveses.CreateNumberParams{
 		Country:        country,
 		Service:        service,
 		IdempotencyKey: idempotencyKey,
@@ -92,7 +92,7 @@ func main() {
 
 	if errors.Is(pollErr, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "\nCancellation requested — releasing the number…")
-		if _, err := client.Activations.Cancel(cleanupCtx, order.OrderID); err != nil {
+		if _, err := client.Numbers.Cancel(cleanupCtx, order.OrderID); err != nil {
 			var sdkErr *eveses.Error
 			if errors.As(err, &sdkErr) && sdkErr.StatusCode == 404 {
 				fmt.Println("Order already in a terminal state; nothing to cancel.")
@@ -111,14 +111,14 @@ func main() {
 
 	if sms == nil {
 		fmt.Println("Timed out waiting for SMS — cancelling and refunding held balance.")
-		if _, err := client.Activations.Cancel(cleanupCtx, order.OrderID); err != nil {
+		if _, err := client.Numbers.Cancel(cleanupCtx, order.OrderID); err != nil {
 			handleSDKError(err)
 		}
 		return
 	}
 
 	fmt.Printf("Got SMS from %s: %q\n", sms.Sender, sms.Text)
-	finished, err := client.Activations.Finish(cleanupCtx, order.OrderID)
+	finished, err := client.Numbers.Finish(cleanupCtx, order.OrderID)
 	if err != nil {
 		handleSDKError(err)
 		return
@@ -135,7 +135,7 @@ func pollForSMS(ctx context.Context, client *eveses.Client, orderID string) (*ev
 	defer ticker.Stop()
 
 	for {
-		bundle, err := client.Activations.Sms(ctx, orderID)
+		bundle, err := client.Numbers.Sms(ctx, orderID)
 		if err != nil {
 			// ctx-cancelled errors come back as transport-level *Error.
 			if ctx.Err() != nil {

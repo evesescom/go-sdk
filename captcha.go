@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -26,7 +27,44 @@ type CaptchaSolveParams struct {
 	TimeoutSec int
 }
 
-// CaptchaService wraps /api/account/captcha.
+const captchaBase = "/api/v1/captcha"
+
+// CaptchaUsageTask is a single captcha task in the usage history.
+type CaptchaUsageTask struct {
+	ID           int    `json:"id"`
+	Type         string `json:"type"`
+	Status       string `json:"status"` // queued|processing|ready|failed
+	CostMicroUSD int    `json:"cost_micro_usd"`
+	CostCents    any    `json:"cost_cents,omitempty"`
+	CreatedAt    string `json:"created_at,omitempty"`
+	ResolvedAt   string `json:"resolved_at,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// CaptchaUsageMeta is the cursor + billing meta on a captcha usage page.
+type CaptchaUsageMeta struct {
+	NextCursor       string `json:"next_cursor,omitempty"`
+	HasMore          bool   `json:"has_more"`
+	UnbilledMicroUSD int    `json:"unbilled_micro_usd,omitempty"`
+	UnbilledCents    any    `json:"unbilled_cents,omitempty"`
+}
+
+// CaptchaUsageResponse is the response of Captcha.Usage — cursor-paginated
+// captcha task history.
+type CaptchaUsageResponse struct {
+	Data []CaptchaUsageTask `json:"data"`
+	Meta CaptchaUsageMeta   `json:"meta"`
+}
+
+// CaptchaUsageParams are the optional filters for Captcha.Usage.
+type CaptchaUsageParams struct {
+	Status string
+	Type   string
+	Cursor string
+	Limit  int
+}
+
+// CaptchaService wraps /api/v1/captcha.
 //
 // It resells 2captcha solving, billed pay-per-use from the wallet
 // (count-on-success).
@@ -76,7 +114,7 @@ func (s *CaptchaService) Solve(ctx context.Context, captchaType string, params m
 	var started captchaStartResponse
 	if err := s.client.do(ctx, requestOptions{
 		method:  "POST",
-		path:    "/api/account/captcha/solve",
+		path:    captchaBase + "/solve",
 		body:    body,
 		headers: headers,
 	}, &started); err != nil {
@@ -109,7 +147,7 @@ func (s *CaptchaService) Solve(ctx context.Context, captchaType string, params m
 		var res captchaResultResponse
 		if err := s.client.do(ctx, requestOptions{
 			method: "GET",
-			path:   "/api/account/captcha/result/" + url.PathEscape(fmt.Sprintf("%d", started.TaskID)),
+			path:   captchaBase + "/result/" + url.PathEscape(fmt.Sprintf("%d", started.TaskID)),
 		}, &res); err != nil {
 			return nil, err
 		}
@@ -142,4 +180,52 @@ func finaliseCaptcha(taskID int, status, solution, errMsg string, price int) (*C
 		Error:         errMsg,
 		PriceMicroUSD: price,
 	}, nil
+}
+
+// Rates returns the per-solve captcha price list via GET /api/v1/captcha/rates.
+func (s *CaptchaService) Rates(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   captchaBase + "/rates",
+	}, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out, nil
+}
+
+// Usage returns the cursor-paginated captcha task history via
+// GET /api/v1/captcha/usage. params may be nil.
+func (s *CaptchaService) Usage(ctx context.Context, params *CaptchaUsageParams) (*CaptchaUsageResponse, error) {
+	q := url.Values{}
+	if params != nil {
+		if params.Status != "" {
+			q.Set("status", params.Status)
+		}
+		if params.Type != "" {
+			q.Set("type", params.Type)
+		}
+		if params.Cursor != "" {
+			q.Set("cursor", params.Cursor)
+		}
+		if params.Limit > 0 {
+			q.Set("limit", strconv.Itoa(params.Limit))
+		}
+	}
+
+	var out CaptchaUsageResponse
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   captchaBase + "/usage",
+		query:  q,
+	}, &out); err != nil {
+		return nil, err
+	}
+	if out.Data == nil {
+		out.Data = []CaptchaUsageTask{}
+	}
+	return &out, nil
 }

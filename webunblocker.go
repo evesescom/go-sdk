@@ -7,7 +7,7 @@ import (
 )
 
 // WebUnblockerPackage describes a Web Unblocker request-count package returned
-// by WebUnblocker.Packages.
+// by WebUnblocker.Pricing.
 type WebUnblockerPackage struct {
 	Requests     int    `json:"requests"`
 	PriceCents   int    `json:"price_cents"`
@@ -60,17 +60,20 @@ type WebUnblockerAccess struct {
 	Orders       []WebUnblockerOrder       `json:"orders"`
 }
 
-// WebUnblockerService wraps /api/account/web-unblocker.
+const webUnblockerBase = "/api/v1/webunblocker"
+
+// WebUnblockerService wraps /api/v1/webunblocker.
 //
-// It covers packages, quoting, purchasing, trial, access/quota checks, and
+// It covers pricing, quoting, purchasing, trial, access/quota checks, and
 // subscription lifecycle management (cancel / pause / resume).
 type WebUnblockerService struct {
 	client *Client
 }
 
-// Packages returns the available Web Unblocker request-count packages.
-func (s *WebUnblockerService) Packages(ctx context.Context) (map[string]any, error) {
-	return s.getMap(ctx, "/api/account/web-unblocker/packages", nil)
+// Pricing returns the available Web Unblocker request-count packages.
+// Replaces the old `packages` verb.
+func (s *WebUnblockerService) Pricing(ctx context.Context) (map[string]any, error) {
+	return s.getMap(ctx, webUnblockerBase+"/pricing", nil)
 }
 
 // Quote estimates the cost of a Web Unblocker purchase before committing.
@@ -82,7 +85,7 @@ func (s *WebUnblockerService) Quote(ctx context.Context, requests int, subscript
 		q.Set("subscription", "1")
 	}
 
-	raw, err := s.getMap(ctx, "/api/account/web-unblocker/quote", q)
+	raw, err := s.getMap(ctx, webUnblockerBase+"/quote", q)
 	if err != nil {
 		return nil, err
 	}
@@ -111,10 +114,11 @@ func (s *WebUnblockerService) Quote(ctx context.Context, requests int, subscript
 	return quote, nil
 }
 
-// Purchase buys a Web Unblocker allocation. Set subscription to start a
-// recurring auto-renewing subscription. idempotencyKey, when non-empty, is
-// forwarded as an Idempotency-Key header so replays return the same order.
-func (s *WebUnblockerService) Purchase(ctx context.Context, requests int, subscription bool, idempotencyKey string) (*WebUnblockerOrder, error) {
+// Buy buys a Web Unblocker allocation via POST /api/v1/webunblocker/orders.
+// Set subscription to start a recurring auto-renewing subscription.
+// idempotencyKey, when non-empty, is forwarded as an Idempotency-Key header so
+// replays return the same order.
+func (s *WebUnblockerService) Buy(ctx context.Context, requests int, subscription bool, idempotencyKey string) (*WebUnblockerOrder, error) {
 	body := map[string]any{
 		"requests":     requests,
 		"subscription": subscription,
@@ -128,7 +132,7 @@ func (s *WebUnblockerService) Purchase(ctx context.Context, requests int, subscr
 	var order WebUnblockerOrder
 	if err := s.client.do(ctx, requestOptions{
 		method:  "POST",
-		path:    "/api/account/web-unblocker/purchase",
+		path:    webUnblockerBase + "/orders",
 		body:    body,
 		headers: headers,
 	}, &order); err != nil {
@@ -140,12 +144,28 @@ func (s *WebUnblockerService) Purchase(ctx context.Context, requests int, subscr
 	return &order, nil
 }
 
+// List returns the user's Web Unblocker orders via
+// GET /api/v1/webunblocker/orders.
+func (s *WebUnblockerService) List(ctx context.Context) ([]WebUnblockerOrder, error) {
+	var out []WebUnblockerOrder
+	if err := s.client.do(ctx, requestOptions{
+		method: "GET",
+		path:   webUnblockerBase + "/orders",
+	}, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []WebUnblockerOrder{}
+	}
+	return out, nil
+}
+
 // Trial activates the free Web Unblocker trial allocation (one-time).
 func (s *WebUnblockerService) Trial(ctx context.Context) (map[string]any, error) {
 	var out map[string]any
 	if err := s.client.do(ctx, requestOptions{
 		method: "POST",
-		path:   "/api/account/web-unblocker/trial",
+		path:   webUnblockerBase + "/trial",
 	}, &out); err != nil {
 		return nil, err
 	}
@@ -161,7 +181,7 @@ func (s *WebUnblockerService) Access(ctx context.Context) (*WebUnblockerAccess, 
 	var out WebUnblockerAccess
 	if err := s.client.do(ctx, requestOptions{
 		method: "GET",
-		path:   "/api/account/web-unblocker",
+		path:   webUnblockerBase,
 	}, &out); err != nil {
 		return nil, err
 	}
@@ -187,7 +207,7 @@ func (s *WebUnblockerService) SubscriptionResume(ctx context.Context) (map[strin
 }
 
 func (s *WebUnblockerService) subscriptionAction(ctx context.Context, action string) (map[string]any, error) {
-	return s.postMap(ctx, "/api/account/web-unblocker/subscription/"+action, nil)
+	return s.postMap(ctx, webUnblockerBase+"/subscription/"+action, nil)
 }
 
 // getMap issues a GET and returns the decoded JSON object as a map.
