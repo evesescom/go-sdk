@@ -151,6 +151,19 @@ func (s *ProxyService) Locations(ctx context.Context, proxyType ProxyType) (map[
 	return s.getMap(ctx, proxyBase+"/locations", q)
 }
 
+// LocationsDetail returns per-country residential state/city/ISP geo
+// drill-down for a picker.
+func (s *ProxyService) LocationsDetail(ctx context.Context, country string, proxyType ProxyType) (map[string]any, error) {
+	q := url.Values{}
+	if proxyType != "" {
+		q.Set("type", string(proxyType))
+	}
+	if country != "" {
+		q.Set("country", country)
+	}
+	return s.getMap(ctx, proxyBase+"/locations/detail", q)
+}
+
 // Quote estimates a purchase before buying (residential GB or a static
 // selection). Type defaults to residential when empty.
 func (s *ProxyService) Quote(ctx context.Context, p *ProxyQuoteParams) (*ProxyQuote, error) {
