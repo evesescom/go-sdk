@@ -131,6 +131,42 @@ _, _ = client.Proxy.SubscriptionPause(ctx)
 _, _ = client.Proxy.SubscriptionResume(ctx)
 ```
 
+## Marketplace
+
+Browse and buy from the account marketplace. Read/browse routes are public
+(`/api/public/marketplace/*`); quote, buy, and order management are
+authenticated (`/api/v1/marketplace/*`). The catalog normalizes the upstream
+provider: attributes are standardized (`country`, `origin`, `format`, `twofa`)
+and `GroupBy = "attributes"` collapses same-type products into groups carrying
+`prices_cents` variants.
+
+```go
+cats, _    := client.Marketplace.Categories(ctx)          // available categories
+filters, _ := client.Marketplace.Filters(ctx, "accounts") // facets for a category
+_, _ = cats, filters
+
+catalog, _ := client.Marketplace.Catalog(ctx, &eveses.MarketplaceCatalogParams{
+    Category: "accounts",
+    Country:  "US",
+    Origin:   "autoreg",
+    GroupBy:  "attributes",
+})
+_ = catalog
+
+// Quote + buy a SKU
+q, _ := client.Marketplace.Quote(ctx, "accounts", "some-sku")
+order, _ := client.Marketplace.Buy(ctx, &eveses.MarketplaceBuyParams{
+    Category: "accounts", SKU: "some-sku", Quantity: 1, IdempotencyKey: "abc-123",
+})
+_ = q
+
+// List orders, fetch one, reveal the delivered secret payload
+orders, _ := client.Marketplace.Orders(ctx)
+one, _    := client.Marketplace.Order(ctx, "b1f2-…-uuid")
+secret, _ := client.Marketplace.Reveal(ctx, order["uuid"].(string))
+_, _, _ = orders, one, secret
+```
+
 ## WebUnblocker
 
 Request-metered Web Unblocker access — hits `/api/v1/webunblocker/*` (no
@@ -337,6 +373,12 @@ client, _ := eveses.New(eveses.Config{
 - **Concurrent use**: `*Client` is safe to share across goroutines.
 
 ## Changelog
+
+### 0.5.0
+
+- **NEW `Marketplace`** (`client.Marketplace`) — browse (`Catalog`, `Categories`, `Filters`) and purchase (`Quote`, `Buy`, `Orders`, `Order`, `Reveal`) the account marketplace. The public catalog supports attribute filters (`country` / `origin` / `format` / `twofa`) and `GroupBy = "country" | "attributes"` — with `"attributes"` same-type products collapse into groups carrying `prices_cents` variants.
+- **`Proxy.LocationsDetail`** (`client.Proxy.LocationsDetail(ctx, country, proxyType)`) — per-country residential state/city/ISP geo drill-down.
+- Default user-agent bumped to `eveses-go/0.5.0`.
 
 ### 0.4.0
 
