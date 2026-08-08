@@ -93,7 +93,7 @@ fmt.Println(bal.AvailableBalance, bal.Currency) // e.g. 4800 USD (cents)
 
 ## Proxy
 
-Residential (metered, per-GB) and static (per-IP: ISP, datacenter, IPv6, sneaker, mobile) proxies. Read the catalogue, quote, buy, list, extend, auto-renew, reset sessions, view usage, and manage the residential subscription.
+Residential (metered, per-GB) and static (per-IP: ISP, datacenter, IPv6, sneaker, mobile) proxies. Read the catalogue, browse targeting (`Locations`, and `LocationsDetail` for a per-country state/city/ISP picker), quote, buy, list, extend, auto-renew, reset sessions, view usage, and manage the residential subscription.
 
 All paths hit `/api/v1/proxy/*` (singular). Orders live under `/orders`.
 
@@ -103,6 +103,10 @@ prices, _ := client.Proxy.Pricing(ctx)                                  // resid
 eps, _    := client.Proxy.Endpoints(ctx)                                // white-label entry subdomains + ports
 locs, _   := client.Proxy.Locations(ctx, eveses.ProxyTypeResidential)   // targeting
 quotas, _ := client.Proxy.Quotas(ctx)                                   // remaining prepaid GB
+
+// Drill into one country for its state / city / ISP picker
+detail, _ := client.Proxy.LocationsDetail(ctx, "us", eveses.ProxyTypeResidential)
+_ = detail
 
 // Quote + buy residential GB
 q, _ := client.Proxy.Quote(ctx, &eveses.ProxyQuoteParams{Type: eveses.ProxyTypeResidential, GB: 5})
@@ -133,18 +137,38 @@ _, _ = client.Proxy.SubscriptionResume(ctx)
 
 ## Marketplace
 
-Browse and buy from the account marketplace. Read/browse routes are public
+Browse and buy from the account marketplace — digital goods (e.g. accounts)
+delivered as a revealable secret payload. Read/browse routes are public
 (`/api/public/marketplace/*`); quote, buy, and order management are
-authenticated (`/api/v1/marketplace/*`). The catalog normalizes the upstream
-provider: attributes are standardized (`country`, `origin`, `format`, `twofa`)
-and `GroupBy = "attributes"` collapses same-type products into groups carrying
-`prices_cents` variants.
+authenticated (`/api/v1/marketplace/*`).
+
+The catalog **never exposes the upstream provider**. Attributes are normalized
+so you filter/group on stable values:
+
+- `country` — ISO-2 uppercase (`US`, `DE`) or a region slug (`mix`, `cis`, `eu`, `asia`, `africa`, `latam`)
+- `origin` — `autoreg` | `selfreg` | `real` | `retrieve`
+- `format` — `tdata` | `session_json` | `session`
+- `twofa` — bool
+
+### Browse
 
 ```go
 cats, _    := client.Marketplace.Categories(ctx)          // available categories
 filters, _ := client.Marketplace.Filters(ctx, "accounts") // facets for a category
 _, _ = cats, filters
+```
 
+### Catalog + GroupBy
+
+`GroupBy` controls the shape of `Catalog`'s response:
+
+- `"country"` (or omitted) — a plain list under `items`: one entry per SKU.
+- `"attributes"` — same-type products collapse into `groups`; each group carries
+  a `prices_cents` variant ladder plus a `has_attributes` flag telling you
+  whether a further attribute pick (format/twofa/…) narrows the group to a SKU.
+
+```go
+// Attributes-grouped: groups with prices_cents + has_attributes
 catalog, _ := client.Marketplace.Catalog(ctx, &eveses.MarketplaceCatalogParams{
     Category: "accounts",
     Country:  "US",
@@ -153,19 +177,49 @@ catalog, _ := client.Marketplace.Catalog(ctx, &eveses.MarketplaceCatalogParams{
 })
 _ = catalog
 
-// Quote + buy a SKU
-q, _ := client.Marketplace.Quote(ctx, "accounts", "some-sku")
-order, _ := client.Marketplace.Buy(ctx, &eveses.MarketplaceBuyParams{
-    Category: "accounts", SKU: "some-sku", Quantity: 1, IdempotencyKey: "abc-123",
+// Plain (per-SKU) listing — items, not groups
+flat, _ := client.Marketplace.Catalog(ctx, &eveses.MarketplaceCatalogParams{
+    Category: "accounts",
+    Country:  "US",
+    GroupBy:  "country",
 })
+_ = flat
+```
+
+`Twofa` is a `*bool`, so leave it nil to skip the filter or set it explicitly:
+
+```go
+yes := true
+twofaOnly, _ := client.Marketplace.Catalog(ctx, &eveses.MarketplaceCatalogParams{
+    Category: "accounts", Format: "session_json", Twofa: &yes,
+})
+_ = twofaOnly
+```
+
+### Purchase flow
+
+```go
+// Quote a specific category/sku before committing
+q, _ := client.Marketplace.Quote(ctx, "accounts", "some-sku")
 _ = q
 
-// List orders, fetch one, reveal the delivered secret payload
+order, _ := client.Marketplace.Buy(ctx, &eveses.MarketplaceBuyParams{
+    Category:       "accounts",
+    SKU:            "some-sku",
+    Quantity:       1,
+    Inputs:         map[string]any{}, // optional SKU-specific purchase inputs
+    IdempotencyKey: "abc-123",        // sent as the Idempotency-Key header
+})
+
+// List your orders, fetch one, then reveal the delivered secret payload
 orders, _ := client.Marketplace.Orders(ctx)
-one, _    := client.Marketplace.Order(ctx, "b1f2-…-uuid")
+one, _    := client.Marketplace.Order(ctx, order["uuid"].(string))
 secret, _ := client.Marketplace.Reveal(ctx, order["uuid"].(string))
 _, _, _ = orders, one, secret
 ```
+
+Browse/order responses are returned as `map[string]any` — the marketplace
+payload varies by category, so the SDK hands you the decoded JSON object.
 
 ## WebUnblocker
 
@@ -373,6 +427,10 @@ client, _ := eveses.New(eveses.Config{
 - **Concurrent use**: `*Client` is safe to share across goroutines.
 
 ## Changelog
+
+### 0.5.1
+
+- Docs: expanded the Marketplace usage section in the README; patch release.
 
 ### 0.5.0
 

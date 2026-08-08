@@ -34,9 +34,9 @@ const (
 	// DefaultTimeout matches the JS / Python / PHP SDKs.
 	DefaultTimeout = 30 * time.Second
 	// DefaultUserAgent identifies SDK + version on every request.
-	DefaultUserAgent = "eveses-go/0.5.0"
+	DefaultUserAgent = "eveses-go/0.5.1"
 	// Version is the SDK semver.
-	Version = "0.5.0"
+	Version = "0.5.1"
 )
 
 // Config configures a Client. Only APIKey is required; the rest fall back
