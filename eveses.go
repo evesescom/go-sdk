@@ -34,9 +34,9 @@ const (
 	// DefaultTimeout matches the JS / Python / PHP SDKs.
 	DefaultTimeout = 30 * time.Second
 	// DefaultUserAgent identifies SDK + version on every request.
-	DefaultUserAgent = "eveses-go/0.6.0"
+	DefaultUserAgent = "eveses-go/0.7.0"
 	// Version is the SDK semver.
-	Version = "0.6.0"
+	Version = "0.7.0"
 )
 
 // Config configures a Client. Only APIKey is required; the rest fall back
@@ -73,6 +73,7 @@ type Client struct {
 
 	Numbers      *NumbersService
 	Wallet       *WalletService
+	Billing      *BillingService
 	Captcha      *CaptchaService
 	Proxy        *ProxyService
 	Marketplace  *MarketplaceService
@@ -120,6 +121,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	c.Numbers = &NumbersService{client: c}
 	c.Wallet = &WalletService{client: c}
+	c.Billing = &BillingService{client: c}
 	c.Captcha = &CaptchaService{client: c}
 	c.Proxy = &ProxyService{client: c}
 	c.Marketplace = &MarketplaceService{client: c}
@@ -166,6 +168,13 @@ func (c *Client) do(ctx context.Context, opts requestOptions, out any) error {
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if out == nil || len(raw) == 0 {
+			return nil
+		}
+		// A *[]byte asks for the body untouched. Needed for anything that is
+		// not JSON: a PDF pushed through json.Unmarshal fails, and pushed
+		// through a string arrives corrupted.
+		if sink, ok := out.(*[]byte); ok {
+			*sink = raw
 			return nil
 		}
 		if err := json.Unmarshal(raw, out); err != nil {
