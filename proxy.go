@@ -99,6 +99,12 @@ type ProxyQuoteParams struct {
 	Selection *ProxyStaticSelection
 	// Quantity is the number of IPs to quote (per-IP types only; default 1).
 	Quantity int
+	// ExtraRequirements are paid options, keyed by the upstream question id
+	// from Pricing. They MOVE THE PRICE, often steeply — measured on one US ISP
+	// address: $2.00 plain, $5.00 with three-device access, $5.60 with a
+	// location request on top. Quote with exactly the answers you intend to buy
+	// with, or you will be shown one price and charged another.
+	ExtraRequirements map[string]string
 }
 
 // ProxyPurchaseParams configures Proxy.Buy.
@@ -110,6 +116,15 @@ type ProxyPurchaseParams struct {
 	Subscription bool
 	// Selection identifies the static product/plan/location (per-IP types only).
 	Selection *ProxyStaticSelection
+	// ExtraRequirements must carry the SAME answers the quote was taken with:
+	// buying without them after quoting with them sells at the plain price and
+	// leaves the premium unpaid. A free-text answer (a city, a subnet) is a
+	// REQUEST, not a reservation — an order that cannot be filled is cancelled
+	// and refunded.
+	ExtraRequirements map[string]string
+	// ExtraRequirementLabels is optional and stored on the order so it reads
+	// "Multi-device access: 3 Devices" rather than "9: 4".
+	ExtraRequirementLabels map[string]string
 	// IdempotencyKey — replays return the same order instead of a new purchase.
 	IdempotencyKey string
 }
@@ -191,6 +206,9 @@ func (s *ProxyService) Quote(ctx context.Context, p *ProxyQuoteParams) (*ProxyQu
 			quantity = 1
 		}
 		q.Set("quantity", strconv.Itoa(quantity))
+		for questionID, answer := range p.ExtraRequirements {
+			q.Set("extra_requirements["+questionID+"]", answer)
+		}
 	}
 
 	raw, err := s.getMap(ctx, proxyBase+"/quote", q)
@@ -229,6 +247,12 @@ func (s *ProxyService) Buy(ctx context.Context, p *ProxyPurchaseParams) (*ProxyO
 			quantity = 1
 		}
 		body["quantity"] = quantity
+		if len(p.ExtraRequirements) > 0 {
+			body["extra_requirements"] = p.ExtraRequirements
+		}
+		if len(p.ExtraRequirementLabels) > 0 {
+			body["extra_requirement_labels"] = p.ExtraRequirementLabels
+		}
 	}
 
 	headers := map[string]string{}

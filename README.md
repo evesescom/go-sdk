@@ -428,6 +428,35 @@ client, _ := eveses.New(eveses.Config{
 
 ## Changelog
 
+### 0.6.0
+
+- **Per-IP proxy orders can now carry paid options.** `quote` and `purchase`
+  accept `extra_requirements` — a map of upstream question id to the buyer's
+  answer, for a city, a subnet, an ISP, or multi-device access. The SDKs
+  previously built the request from a fixed field list and dropped anything
+  else silently: you could pass the options, get no error, and receive a plain
+  address.
+- These answers **move the price**, often steeply. Measured on one US ISP
+  address: $2.00 plain, $5.00 with three-device access, $5.60 with a location
+  request on top. Quote with exactly the answers you intend to buy with, or you
+  will be shown one price and charged another.
+- A free-text answer is a **request, not a reservation**. An order that cannot
+  be filled is cancelled and refunded, so the risk is not the buyer's.
+- `purchase` also takes optional `extra_requirement_labels`, stored on the
+  order so it reads "Multi-device access: 3 Devices" rather than "9: 4".
+
+### 0.5.2
+
+- **The `numbers` namespace now actually exists in the code.** It has been
+  documented here since 0.4.0 as the merge of `activations` + `catalog`, but
+  the released packages still shipped the old split modules — following this
+  README produced a compile/attribute error. The code now matches what this
+  document has been promising: `numbers`, plus `me`, `orders`, `pricing` and
+  `quotas`. All four SDKs expose the identical surface.
+- If you are upgrading from a release where `activations`/`catalog` worked,
+  those names are gone: `activations.create` → `numbers.create`, and the
+  catalog lookups move under `numbers` as well.
+
 ### 0.5.1
 
 - Docs: expanded the Marketplace usage section in the README; patch release.
