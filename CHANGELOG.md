@@ -4,6 +4,19 @@ All notable changes to this SDK. Versions follow the API's own
 [changelog](https://eveses.com/changelog/api); the SDK version and the API
 version are deliberately not the same number.
 
+## 0.7.2
+
+### Fixed
+
+- `DefaultUserAgent` still announced 0.7.0; it now follows `Version`. All four SDKs report the same version again.
+
+## 0.7.1
+
+### Changed
+
+- Default base URL is now `https://api.eveses.com` (was `https://api.eveses.io`,
+  a domain that was never ours). Pass `BaseURL` explicitly to target another host.
+
 ## 0.7.0
 
 ### Added

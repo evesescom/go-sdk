@@ -355,3 +355,13 @@ func TestNew_RequiresAPIKey(t *testing.T) {
 		t.Fatalf("expected *Error, got %T", err)
 	}
 }
+
+func TestDefaultBaseURL_IsEvesesCom(t *testing.T) {
+	c, err := New(Config{APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.baseURL != "https://api.eveses.com" {
+		t.Fatalf("baseURL = %q", c.baseURL)
+	}
+}

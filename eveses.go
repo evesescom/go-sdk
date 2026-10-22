@@ -30,13 +30,13 @@ import (
 
 const (
 	// DefaultBaseURL is the production API root.
-	DefaultBaseURL = "https://api.eveses.io"
+	DefaultBaseURL = "https://api.eveses.com"
 	// DefaultTimeout matches the JS / Python / PHP SDKs.
 	DefaultTimeout = 30 * time.Second
 	// DefaultUserAgent identifies SDK + version on every request.
-	DefaultUserAgent = "eveses-go/0.7.0"
+	DefaultUserAgent = "eveses-go/0.7.2"
 	// Version is the SDK semver.
-	Version = "0.7.0"
+	Version = "0.7.2"
 )
 
 // Config configures a Client. Only APIKey is required; the rest fall back
